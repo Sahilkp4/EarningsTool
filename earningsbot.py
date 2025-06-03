@@ -12,23 +12,22 @@ from alpaca_trade_api.rest import REST as AlpacaREST, APIError
 # ─── Constants & Configuration ─────────────────────────────────────────────────
 TZ = ZoneInfo("America/New_York")
 
-# Load API keys from environment (no hard-coding)
+# Load API keys from environment
 FINNHUB_API_KEY       = os.getenv("FINNHUB_API_KEY")
 APCA_KEY              = os.getenv("APCA_API_KEY_ID")
 APCA_SECRET           = os.getenv("APCA_API_SECRET_KEY")
 ALPACA_BASE_URL       = "https://paper-api.alpaca.markets"
 
-# Trading parameters (easily toggled at the top)
-STOP_LOSS_FACTOR      = 0.96    # 4% stop-loss
+# Trading parameters
+STOP_LOSS_FACTOR      = 0.96    # 4% stop‐loss
 TARGET_FACTOR         = 1.0267  # 2.67% profit target
 MONITOR_END_HOUR      = 15
 MONITOR_END_MINUTE    = 33
-SURPRISE_THRESHOLD    = 50      # minimum EPS surprise (%) to consider
+SURPRISE_THRESHOLD    = 10      # minimum EPS surprise (%) to consider
 MC_THRESHOLD          = 10_000  # max market cap (in millions USD) to consider
 
-# Price change filter: (open_price / prev_close) - 1 must be between MIN and MAX
-MIN_PRICE_PCT_CHANGE  = -0.01   # −1% (i.e., open ≥ 99% of prev_close)
-MAX_PRICE_PCT_CHANGE  =  0.20   # +20% (i.e., open ≤ 120% of prev_close)
+# Alpaca API rate‐limit buffers
+GROUP_SLEEP_SEC       = 1.0     # pause between trade‐polling bursts
 
 
 # ─── Logging Configuration ─────────────────────────────────────────────────────
@@ -36,21 +35,20 @@ def configure_logging() -> logging.Logger:
     logger = logging.getLogger("earnings_trader")
     logger.setLevel(logging.DEBUG)
     if not logger.handlers:
-        fmt = logging.Formatter("%(asctime)s %(levelname)s: %(message)s", "%Y-%m-%d %H:%M:%S %Z")
-
+        fmt = logging.Formatter(
+            "%(asctime)s %(levelname)s: %(message)s", "%Y-%m-%d %H:%M:%S %Z"
+        )
         # Console handler
         ch = logging.StreamHandler()
         ch.setLevel(logging.DEBUG)
         ch.setFormatter(fmt)
         logger.addHandler(ch)
-
         # File handler
         log_path = os.path.join(os.path.dirname(__file__), "session_output.txt")
         fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
         fh.setLevel(logging.DEBUG)
         fh.setFormatter(fmt)
         logger.addHandler(fh)
-
     return logger
 
 logger = configure_logging()
@@ -64,15 +62,13 @@ def get_prev_business_day(ref_date: date) -> date:
         if d.weekday() < 5:
             return d
 
-
 def is_within_earnings_window(entry: dict, start_str: str, end_str: str) -> bool:
     e_date, e_hour = entry.get("date"), entry.get("hour")
     return ((e_date == start_str and e_hour == "amc") or
             (e_date == end_str   and e_hour == "bmo"))
 
-
 def sleep_until_market_open(api: AlpacaREST, tz: ZoneInfo):
-    """Poll Alpaca clock every few minutes until market opens."""
+    """Poll Alpaca clock until market opens."""
     while True:
         try:
             clock = api.get_clock()
@@ -88,15 +84,14 @@ def sleep_until_market_open(api: AlpacaREST, tz: ZoneInfo):
         next_open = clock.next_open.astimezone(tz)
         now = datetime.now(tz)
         secs_to_open = (next_open - now).total_seconds()
+        logger.debug(f"Market closed. Now: {now.time()}, Next open: {next_open.time()} (in {secs_to_open:.1f}s)")
 
         if secs_to_open > 300:
-            logger.info("Market closed; sleeping 5m until ~%s", next_open)
+            logger.info("Sleeping 5m until ~%s", next_open)
             time.sleep(300)
         else:
-            logger.info("Market opens in ~%.1f seconds at %s; sleeping until then",
-                        secs_to_open, next_open)
+            logger.info("Sleeping until ~%s", next_open)
             time.sleep(max(0, secs_to_open))
-
 
 def get_cutoff_time(today: date, hour: int, minute: int, tz: ZoneInfo) -> datetime:
     return datetime(
@@ -117,152 +112,253 @@ def fetch_earnings_calendar(fh_client: finnhub.Client,
     try:
         cal = fh_client.earnings_calendar(symbol=None, _from=start_str, to=end_str)
         entries = cal.get("earningsCalendar", [])
-        logger.info(f"Fetched {len(entries)} earnings-calendar entries")
+        logger.info(f"Fetched {len(entries)} earnings‐calendar entries")
         return entries
     except Exception as e:
         logger.exception("Failed to fetch earnings calendar: %s", e)
         sys.exit(1)
 
-
 def filter_candidates(entries: List[dict], fh_client: finnhub.Client,
                       start_str: str, end_str: str) -> List[dict]:
     candidates = []
+    logger.debug("Starting candidate filtering based on earnings surprise and market cap")
     for e in entries:
         sym = e.get("symbol")
         est = e.get("epsEstimate")
         act = e.get("epsActual")
+        logger.debug(f"Evaluating {sym}: estimate={est}, actual={act}")
         if est is None or act is None or est == 0:
+            logger.debug(f"Skipping {sym}: missing or zero estimate/actual")
             continue
 
         surprise = (act - est) / abs(est) * 100
         if surprise <= SURPRISE_THRESHOLD or not is_within_earnings_window(e, start_str, end_str):
+            logger.debug(f"Skipping {sym}: surprise={surprise:.2f}% below threshold or wrong window")
             continue
 
         try:
             prof = fh_client.company_profile2(symbol=sym)
             mc = prof.get("marketCapitalization", 0)
+            logger.debug(f"{sym} market cap={mc}M")
         except Exception as exc:
-            logger.warning("Could not fetch profile for %s: %s", sym, exc)
+            logger.warning(f"Could not fetch profile for {sym}: {exc}")
             continue
 
         if mc <= MC_THRESHOLD:
             candidates.append({"symbol": sym, "surprise": surprise})
             logger.info(f"Candidate {sym}: surprise={surprise:.2f}% mc={mc}M")
+        else:
+            logger.debug(f"Skipping {sym}: market cap {mc}M above threshold")
 
     candidates.sort(key=lambda x: x["surprise"], reverse=True)
     logger.info(f"Total filtered candidates: {len(candidates)}")
+    logger.debug(f"Filtered list: {[c['symbol'] for c in candidates]}")
     return candidates
 
-
-def place_buy_order(api: AlpacaREST, filtered: List[dict]) -> Optional[dict]:
+def group_candidates_by_surprise(candidates: List[Dict[str, float]]) -> List[List[Dict[str, float]]]:
     """
-    Attempt to buy the top candidates in descending surprise order.
-    Returns a buy_info dict on success, or None if all fail.
+    Group candidates so that within each group, the difference between
+    highest and lowest surprise ≤ 15, and at most 5 symbols per group.
     """
-    for entry in filtered:
-        sym      = entry["symbol"]
-        surprise = entry["surprise"]
+    groups: List[List[Dict[str, float]]] = []
+    remaining = candidates.copy()
+    logger.debug("Starting grouping of candidates by surprise ranges")
 
-        # 1) Retrieve today’s 1-minute bar at open (open_price)
+    while remaining:
+        base_entry = remaining.pop(0)
+        base_surp = base_entry["surprise"]
+        group = [base_entry]
+        to_remove = []
+        logger.debug(f"Forming new group with base {base_entry['symbol']} (surprise={base_surp:.2f}%)")
+        for entry in remaining:
+            if len(group) >= 5:
+                break
+            if base_surp - entry["surprise"] <= 15:
+                group.append(entry)
+                to_remove.append(entry)
+                logger.debug(f"  Adding {entry['symbol']} (surprise={entry['surprise']:.2f}%) to group")
+        for entry in to_remove:
+            remaining.remove(entry)
+        groups.append(group)
+
+    logger.info(f"Formed {len(groups)} candidate groups")
+    for i, grp in enumerate(groups, start=1):
+        logger.debug(f" Group {i}: {[x['symbol'] for x in grp]} with surprises {[x['surprise'] for x in grp]}")
+    return groups
+
+def preload_prev_closes(api: AlpacaREST,
+                        groups: List[List[Dict[str, float]]],
+                        start_str: str) -> Dict[str, float]:
+    """
+    Before market open, fetch exactly the 'start_str' day's close for every symbol.
+    Uses timeframe=1Day with start/end = start_str's midnight to 23:59:59, then takes .c.
+    start_str is in "YYYY-MM-DD" form (previous business day).
+    Returns a dict: {symbol: prev_close}.
+    """
+    symbols = { entry["symbol"] for group in groups for entry in group }
+    prev_close_dict: Dict[str, float] = {}
+    logger.info(f"Preloading previous close for {len(symbols)} symbols (date = {start_str})")
+
+    # Build ISO timestamps for the entire 'start_str' day in EST
+    # (adjust -04:00 for EDT if needed—here we assume start_str is in DST if relevant)
+    # Example: start_str = "2025-06-02"
+    day_start_iso = f"{start_str}T00:00:00-04:00"
+    day_end_iso   = f"{start_str}T23:59:59-04:00"
+
+    for sym in symbols:
         try:
-            bars_1min = api.get_bars(
+            bars_yesterday = api.get_bars(
                 sym,
-                timeframe="1Min",
+                timeframe="1Day",
+                start=day_start_iso,
+                end=day_end_iso,
                 limit=1,
                 adjustment="raw"
             )
-            if not bars_1min:
-                logger.error("No 1-minute bar for %s at open", sym)
-                continue
-            open_price = bars_1min[0].o
-            logger.info(f"Open price for {sym}: {open_price:.2f}")
+            if bars_yesterday:
+                prev_close = bars_yesterday[0].c
+                prev_close_dict[sym] = prev_close
+                logger.debug(f"{sym}: {start_str} close={prev_close:.2f}")
+            else:
+                logger.warning(f"No 1Day bar found for {sym} on {start_str}; skipping symbol")
         except Exception as exc:
-            logger.warning(f"Error fetching 1-min bar for {sym}: {exc}")
+            logger.warning(f"Error fetching {start_str} bar for {sym}: {exc}")
+
+        # Pace requests lightly (we're pre-open)
+        time.sleep(0.11)
+
+    logger.debug(f"Preloaded prev_close_dict: {prev_close_dict}")
+    return prev_close_dict
+
+def evaluate_groups_and_buy(api: AlpacaREST,
+                            groups: List[List[Dict[str, float]]],
+                            prev_close_dict: Dict[str, float]) -> Optional[dict]:
+    """
+    For each group, in turn:
+      1) At or after 9:30, poll latest executed trade for each symbol in a burst
+         until at least one symbol shows a trade timestamp > 9:30:00.
+      2) Among symbols with a post‐open trade, compute pct change = (trade_price / prev_close) - 1.
+      3) If any pct_change > 0, buy the one with highest pct_change at market.
+      4) If none positive, move to next group.
+    """
+    today = datetime.now(TZ).date()
+    market_open_dt = datetime(today.year, today.month, today.day, 9, 30, 0, tzinfo=TZ)
+    logger.debug(f"Market open datetime programmed as {market_open_dt}")
+
+    # If running before 9:30, wait until then
+    now = datetime.now(TZ)
+    if now < market_open_dt:
+        secs_to_open = (market_open_dt - now).total_seconds()
+        logger.info(f"Waiting {secs_to_open:.1f}s until 9:30 AM")
+        time.sleep(secs_to_open)
+
+    for idx, group in enumerate(groups, start=1):
+        symbols_in_group = [entry["symbol"] for entry in group]
+        logger.info(f"Evaluating group {idx}/{len(groups)}: {symbols_in_group}")
+
+        # 1) Poll latest trades in a burst (no small sleep between calls)
+        first_trades: Dict[str, float] = {}
+        while True:
+            logger.debug(f"Burst polling for post-open trades in group {idx}")
+            for sym in symbols_in_group:
+                prev_close = prev_close_dict.get(sym)
+                if prev_close is None or prev_close <= 0:
+                    logger.debug(f"No valid prev_close for {sym}; skipping this symbol")
+                    continue
+
+                try:
+                    trade = api.get_latest_trade(sym)
+                    trade_dt = trade.timestamp.astimezone(TZ)
+                    trade_price = trade.price
+                    logger.debug(f"{sym} latest trade at {trade_dt.time()} price {trade_price:.2f}")
+                    if trade_dt > market_open_dt:
+                        if sym not in first_trades:
+                            first_trades[sym] = trade_price
+                            logger.info(f"Recorded first post-open trade for {sym} at {trade_dt.time()} → {trade_price:.2f}")
+                except Exception as exc:
+                    logger.warning(f"Error fetching latest trade for {sym}: {exc}")
+
+            if first_trades:
+                logger.debug(f"First post-open trades received: {first_trades}")
+                break
+            else:
+                logger.debug(f"No post-open trades yet for group {idx}; sleeping {GROUP_SLEEP_SEC}s before retry")
+                time.sleep(GROUP_SLEEP_SEC)
+
+        # 2) Compute percentage change vs prev_close for each symbol that traded
+        positive_moves: Dict[str, float] = {}
+        for sym, trade_price in first_trades.items():
+            prev_close = prev_close_dict[sym]
+            pct_change = (trade_price / prev_close) - 1.0
+            logger.info(f"{sym}: post-open trade={trade_price:.2f}, prev_close={prev_close:.2f}, pct_change={pct_change*100:.2f}%")
+            if pct_change > 0:
+                positive_moves[sym] = pct_change
+
+        logger.debug(f"Positive moves in group {idx}: {positive_moves}")
+        if not positive_moves:
+            logger.info(f"No positive moves in group {idx}; moving to next group")
             continue
 
-        # 2) Fetch previous day's close and enforce MIN/MAX price-change filter
-        try:
-            bars_daily = api.get_bars(
-                sym,
-                timeframe="1Day",
-                limit=2,
-                adjustment="raw"
-            )
-            if len(bars_daily) < 2:
-                logger.warning("Not enough daily bars to compute previous close for %s", sym)
-                continue
+        # 3) Choose symbol with highest positive pct_change
+        chosen_sym = max(positive_moves, key=positive_moves.get)
+        chosen_price = first_trades[chosen_sym]
+        logger.info(f"Chosen to buy {chosen_sym} with pct_change={positive_moves[chosen_sym]*100:.2f}% at reference price {chosen_price:.2f}")
 
-            prev_close = bars_daily[-2].c
-            pct_change = (open_price / prev_close) - 1.0
-            logger.info(f"{sym}: prev_close={prev_close:.2f}, open={open_price:.2f}, "
-                        f"pct_change={pct_change*100:.2f}%")
-        except Exception as exc:
-            logger.warning(f"Error fetching daily bars for {sym}: {exc}")
-            continue
-
-        if pct_change < MIN_PRICE_PCT_CHANGE or pct_change > MAX_PRICE_PCT_CHANGE:
-            logger.info(
-                f"Skipping {sym}: price move {pct_change*100:.2f}% ∉ "
-                f"[{MIN_PRICE_PCT_CHANGE*100:.2f}%, {MAX_PRICE_PCT_CHANGE*100:.2f}%]"
-            )
-            continue
-
-        # 3) Compute how many shares we can afford using all available cash
+        # 4) Submit market buy for as many shares as cash allows
         try:
             acct = api.get_account()
             cash_available = float(acct.cash)
-            max_shares     = int(cash_available // open_price)
-            logger.debug(f"cash_available=${cash_available:.2f} → max_shares={max_shares}")
+            max_shares     = int(cash_available // chosen_price)
+            logger.debug(f"cash_available=${cash_available:.2f} → max_shares={max_shares} for {chosen_sym}")
         except Exception as exc:
-            logger.exception(f"Failed to fetch account data for {sym}: {exc}")
-            continue
+            logger.exception(f"Failed to fetch account data for {chosen_sym}: {exc}")
+            return None
 
         if max_shares < 1:
-            logger.error(f"Insufficient cash to buy even one share of {sym}")
-            continue
+            logger.error(f"Insufficient cash to buy even one share of {chosen_sym}")
+            return None
 
-        # 4) “Shave one share at a time” loop
         order_qty = max_shares
         while order_qty > 0:
+            logger.debug(f"Attempting to buy {order_qty} shares of {chosen_sym}")
             try:
                 order = api.submit_order(
-                    symbol=sym,
+                    symbol=chosen_sym,
                     qty=order_qty,
                     side="buy",
                     type="market",
                     time_in_force="day"
                 )
-                logger.info(f"SUBMITTED BUY {sym} | qty={order_qty} | order_id={order.id}")
+                logger.info(f"SUBMITTED BUY {chosen_sym} | qty={order_qty} | order_id={order.id}")
+                actual_buy_price = chosen_price  # reference price = first post-open trade
                 return {
-                    "symbol":    sym,
+                    "symbol":    chosen_sym,
                     "buy_time":  datetime.now(TZ).replace(microsecond=0).isoformat(),
-                    "buy_price": open_price,
+                    "buy_price": actual_buy_price,
                     "qty":       order_qty,
                     "order_id":  order.id
                 }
-
             except APIError as e:
                 err_msg = str(e).lower()
-                logger.warning(f"Buy {sym} qty={order_qty} failed: {e}")
+                logger.warning(f"Buy {chosen_sym} qty={order_qty} failed: {e}")
                 if "insufficient buying power" in err_msg:
                     order_qty -= 1
-                    logger.debug(f"Retrying {sym} with qty={order_qty}")
+                    logger.debug(f"Retrying {chosen_sym} with qty={order_qty}")
                     time.sleep(1)
                     continue
                 else:
-                    logger.exception(f"Unexpected APIError for {sym}: {e}")
+                    logger.exception(f"Unexpected APIError for {chosen_sym}: {e}")
                     break
-
             except Exception as e:
-                logger.exception(f"Unexpected exception when buying {sym}: {e}")
+                logger.exception(f"Unexpected exception when buying {chosen_sym}: {e}")
                 break
 
-        # If we exit the while-loop without a return, move to next candidate
-        logger.error(f"Could not place any buy order for {sym}, trying next candidate")
-        time.sleep(1)
+        logger.error(f"Could not place any buy order for {chosen_sym}; moving to next group")
+        time.sleep(GROUP_SLEEP_SEC)
 
-    return None  # no successful buy
-
+    # If no purchase succeeded across all groups
+    logger.info("No purchase executed across any group")
+    return None
 
 def monitor_trade(api: AlpacaREST, buy_info: dict):
     symbol    = buy_info["symbol"]
@@ -283,14 +379,18 @@ def monitor_trade(api: AlpacaREST, buy_info: dict):
         try:
             trade = api.get_latest_trade(symbol)
             price = trade.price
+            trade_dt = trade.timestamp.astimezone(TZ)
             if price is None:
-                time.sleep(1)
+                logger.debug(f"No price from latest_trade for {symbol}; skipping iteration")
+                time.sleep(0.30)
                 continue
 
             now = datetime.now(TZ)
+            logger.debug(f"{symbol} latest trade at {trade_dt.time()} price {price:.2f}")
 
-            # (1) Time-based exit
+            # (1) Time‐based exit (only if target not yet hit)
             if not hit_target and now >= cutoff_time:
+                logger.info(f"{symbol} time cutoff reached at {now.time()}; selling at market")
                 sell = api.submit_order(
                     symbol=symbol,
                     qty=qty,
@@ -298,11 +398,12 @@ def monitor_trade(api: AlpacaREST, buy_info: dict):
                     type="market",
                     time_in_force="day"
                 )
-                logger.info(f"TIME-EXIT SELL {symbol} | order_id={sell.id}")
+                logger.info(f"TIME‐EXIT SELL {symbol} | order_id={sell.id}")
                 break
 
-            # (2) Hard stop-loss
+            # (2) Hard stop‐loss
             if price <= buy_price * stop_loss_factor:
+                logger.info(f"{symbol} hit stop-loss at price {price:.2f} (<= {buy_price*stop_loss_factor:.2f}); selling")
                 sell = api.submit_order(
                     symbol=symbol,
                     qty=qty,
@@ -310,21 +411,22 @@ def monitor_trade(api: AlpacaREST, buy_info: dict):
                     type="market",
                     time_in_force="day"
                 )
-                logger.info(f"STOP-LOSS SELL {symbol} | order_id={sell.id}")
+                logger.info(f"STOP‐LOSS SELL {symbol} | order_id={sell.id}")
                 break
 
             # (3) Initial profit target reached
             if not hit_target and price >= buy_price * target_factor:
                 hit_target = True
                 peak_price = price
-                logger.info(f"TARGET HIT {symbol} | peak={peak_price:.2f}")
+                logger.info(f"{symbol} hit target at price {price:.2f}; peak_price set")
 
             # (4) Trailing stop once target is hit
             if hit_target:
                 if price > peak_price:
+                    logger.debug(f"{symbol} new peak price {price:.2f} (old peak {peak_price:.2f})")
                     peak_price = price
-                    logger.debug(f"New peak for {symbol}: {peak_price:.2f}")
                 elif price < peak_price:
+                    logger.info(f"{symbol} price dropped below peak {peak_price:.2f} to {price:.2f}; trailing-stop sell")
                     sell = api.submit_order(
                         symbol=symbol,
                         qty=qty,
@@ -332,22 +434,22 @@ def monitor_trade(api: AlpacaREST, buy_info: dict):
                         type="market",
                         time_in_force="day"
                     )
-                    logger.info(f"TRAILING-STOP SELL {symbol} | order_id={sell.id}")
+                    logger.info(f"TRAILING‐STOP SELL {symbol} | order_id={sell.id}")
                     break
 
         except APIError as e:
             logger.warning(f"APIError in monitoring loop for {symbol}: {e}")
-            time.sleep(1)
+            time.sleep(0.30)
             continue
         except Exception as e:
             logger.exception(f"Unexpected error in monitoring loop for {symbol}: {e}")
-            time.sleep(1)
+            time.sleep(0.30)
             continue
 
-        time.sleep(1)
+        # Poll every ~0.30 seconds for the latest executed trade
+        time.sleep(0.30)
 
     logger.info("Monitoring ended. Trading run completed.")
-
 
 def main():
     # 1) Verify required environment variables
@@ -365,8 +467,8 @@ def main():
     # 2) Compute today & previous business day
     today     = datetime.now(TZ).date()
     prev_bday = get_prev_business_day(today)
-    start_str = prev_bday.isoformat()
-    end_str   = today.isoformat()
+    start_str = prev_bday.isoformat()   # e.g. "2025-06-02"
+    end_str   = today.isoformat()       # e.g. "2025-06-03"
     logger.info(f"Fetching earnings calendar from {start_str} to {end_str}")
 
     # 3) Fetch & filter candidates (AMC/BMO, surprise, market cap)
@@ -376,7 +478,16 @@ def main():
         logger.error("No candidates found; exiting")
         sys.exit(1)
 
-    # 4) Wait for market open if necessary (ensures start-of-day buy happens right at open)
+    # 4) Group candidates by surprise‐range (each group sorted by surprise descending)
+    groups = group_candidates_by_surprise(filtered)
+
+    # 5) Preload exactly 'start_str' (June 2) close for every symbol in all groups
+    prev_close_dict = preload_prev_closes(alpaca_api, groups, start_str)
+    if not prev_close_dict:
+        logger.error("Failed to preload any previous closes; exiting")
+        sys.exit(1)
+
+    # 6) Wait for market open if necessary
     try:
         clock = alpaca_api.get_clock()
     except Exception as e:
@@ -388,21 +499,14 @@ def main():
     else:
         logger.info("Market already OPEN at %s", clock.timestamp.astimezone(TZ))
 
-    # 5) Place buy order (first candidate that meets price-change filter & affordability)
-    buy_info = place_buy_order(alpaca_api, filtered)
+    # 7) Evaluate each group and attempt to buy
+    buy_info = evaluate_groups_and_buy(alpaca_api, groups, prev_close_dict)
     if not buy_info:
-        logger.error("No purchase succeeded; exiting")
+        logger.error("No purchase succeeded across all groups; exiting")
         sys.exit(1)
 
-    # 6) Monitor the trade and potentially sell (stop-loss, target, trailing stop, time-exit)
+    # 8) Monitor the trade (polling every 0.30s) and potentially sell
     monitor_trade(alpaca_api, buy_info)
-
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
