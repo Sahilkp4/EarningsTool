@@ -2,7 +2,7 @@ import os
 import sys
 import time
 import logging
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import List, Dict, Optional
 
@@ -24,8 +24,9 @@ TARGET_FACTOR         = 1.0267  # 2.67% profit target
 MONITOR_END_HOUR      = 15
 MONITOR_END_MINUTE    = 33
 SURPRISE_THRESHOLD    = 10      # minimum EPS surprise (%) to consider
+MAX_SURPRISE          = 500     # Max EPS surprise % to consider 
 MC_THRESHOLD          = 10_000  # max market cap (in millions USD) to consider
-
+GROUP_THRESHOLD       = 50      # % gap to split groups
 # Alpaca API rate‐limit buffers
 GROUP_SLEEP_SEC       = 1.0     # pause between trade‐polling bursts
 
@@ -127,19 +128,33 @@ def filter_candidates(entries: List[dict], fh_client: finnhub.Client,
         est = e.get("epsEstimate")
         act = e.get("epsActual")
         logger.debug(f"Evaluating {sym}: estimate={est}, actual={act}")
+
+        # Skip if estimate or actual is missing, or if est == 0 (avoid divide‐by‐zero)
         if est is None or act is None or est == 0:
             logger.debug(f"Skipping {sym}: missing or zero estimate/actual")
             continue
+       
+        # ───── ADD THIS CHECK ─────
+        if act < 0:
+            logger.debug(f"Skipping {sym}: actual EPS is still negative")
+            continue
+        # ─────────────────────────
 
+        # Now compute surprise over abs(est). 
+        # If est < 0 but act ≥ 0, this measures “neg to pos” correctly.
         surprise = (act - est) / abs(est) * 100
+
+        if surprise > MAX_SURPRISE:
+            logger.debug(f"Skipping {sym}: surprise={surprise:.2f}% exceeds cap of {MAX_SURPRISE}%")
+            continue
+
         if surprise <= SURPRISE_THRESHOLD or not is_within_earnings_window(e, start_str, end_str):
             logger.debug(f"Skipping {sym}: surprise={surprise:.2f}% below threshold or wrong window")
             continue
 
         try:
-            prof = fh_client.company_profile2(symbol=sym)
-            mc = prof.get("marketCapitalization", 0)
-            logger.debug(f"{sym} market cap={mc}M")
+            profile = fh_client.company_profile2(symbol=sym)
+            mc = float(profile.get("marketCapitalization", 0)) / 1e6
         except Exception as exc:
             logger.warning(f"Could not fetch profile for {sym}: {exc}")
             continue
@@ -154,6 +169,7 @@ def filter_candidates(entries: List[dict], fh_client: finnhub.Client,
     logger.info(f"Total filtered candidates: {len(candidates)}")
     logger.debug(f"Filtered list: {[c['symbol'] for c in candidates]}")
     return candidates
+
 
 def group_candidates_by_surprise(candidates: List[Dict[str, float]]) -> List[List[Dict[str, float]]]:
     """
@@ -173,7 +189,7 @@ def group_candidates_by_surprise(candidates: List[Dict[str, float]]) -> List[Lis
         for entry in remaining:
             if len(group) >= 5:
                 break
-            if base_surp - entry["surprise"] <= 15:
+            if base_surp - entry["surprise"] <= GROUP_THRESHOLD:
                 group.append(entry)
                 to_remove.append(entry)
                 logger.debug(f"  Adding {entry['symbol']} (surprise={entry['surprise']:.2f}%) to group")
@@ -200,8 +216,6 @@ def preload_prev_closes(api: AlpacaREST,
     logger.info(f"Preloading previous close for {len(symbols)} symbols (date = {start_str})")
 
     # Build ISO timestamps for the entire 'start_str' day in EST
-    # (adjust -04:00 for EDT if needed—here we assume start_str is in DST if relevant)
-    # Example: start_str = "2025-06-02"
     day_start_iso = f"{start_str}T00:00:00-04:00"
     day_end_iso   = f"{start_str}T23:59:59-04:00"
 
@@ -231,13 +245,14 @@ def preload_prev_closes(api: AlpacaREST,
     return prev_close_dict
 
 def evaluate_groups_and_buy(api: AlpacaREST,
+                            fh_client: finnhub.Client,
                             groups: List[List[Dict[str, float]]],
                             prev_close_dict: Dict[str, float]) -> Optional[dict]:
     """
     For each group, in turn:
-      1) At or after 9:30, poll latest executed trade for each symbol in a burst
-         until at least one symbol shows a trade timestamp > 9:30:00.
-      2) Among symbols with a post‐open trade, compute pct change = (trade_price / prev_close) - 1.
+      1) At or after 9:30, poll Finnhub quote for each symbol in a burst
+         until at least one symbol shows a post-open timestamp.
+      2) Among symbols with a post-open quote, compute pct change = (price / prev_close) - 1.
       3) If any pct_change > 0, buy the one with highest pct_change at market.
       4) If none positive, move to next group.
     """
@@ -256,10 +271,10 @@ def evaluate_groups_and_buy(api: AlpacaREST,
         symbols_in_group = [entry["symbol"] for entry in group]
         logger.info(f"Evaluating group {idx}/{len(groups)}: {symbols_in_group}")
 
-        # 1) Poll latest trades in a burst (no small sleep between calls)
-        first_trades: Dict[str, float] = {}
+        # 1) Poll Finnhub quote in a burst (no small sleep between calls)
+        first_quotes: Dict[str, float] = {}
         while True:
-            logger.debug(f"Burst polling for post-open trades in group {idx}")
+            logger.debug(f"Burst polling for post-open quotes in group {idx}")
             for sym in symbols_in_group:
                 prev_close = prev_close_dict.get(sym)
                 if prev_close is None or prev_close <= 0:
@@ -267,30 +282,33 @@ def evaluate_groups_and_buy(api: AlpacaREST,
                     continue
 
                 try:
-                    trade = api.get_latest_trade(sym)
-                    trade_dt = trade.timestamp.astimezone(TZ)
-                    trade_price = trade.price
-                    logger.debug(f"{sym} latest trade at {trade_dt.time()} price {trade_price:.2f}")
+                    quote = fh_client.quote(sym)
+                    trade_unix = quote.get('t')
+                    if not trade_unix:
+                        continue
+                    trade_dt = datetime.fromtimestamp(trade_unix, tz=timezone.utc).astimezone(TZ)
+                    trade_price = quote.get('c')
+                    logger.debug(f"{sym} latest quote at {trade_dt.time()} price {trade_price:.2f}")
                     if trade_dt > market_open_dt:
-                        if sym not in first_trades:
-                            first_trades[sym] = trade_price
-                            logger.info(f"Recorded first post-open trade for {sym} at {trade_dt.time()} → {trade_price:.2f}")
+                        if sym not in first_quotes:
+                            first_quotes[sym] = trade_price
+                            logger.info(f"Recorded first post-open quote for {sym} at {trade_dt.time()} → {trade_price:.2f}")
                 except Exception as exc:
-                    logger.warning(f"Error fetching latest trade for {sym}: {exc}")
+                    logger.warning(f"Error fetching Finnhub quote for {sym}: {exc}")
 
-            if first_trades:
-                logger.debug(f"First post-open trades received: {first_trades}")
+            if first_quotes:
+                logger.debug(f"First post-open quotes received: {first_quotes}")
                 break
             else:
-                logger.debug(f"No post-open trades yet for group {idx}; sleeping {GROUP_SLEEP_SEC}s before retry")
+                logger.debug(f"No post-open quotes yet for group {idx}; sleeping {GROUP_SLEEP_SEC}s before retry")
                 time.sleep(GROUP_SLEEP_SEC)
 
-        # 2) Compute percentage change vs prev_close for each symbol that traded
+        # 2) Compute percentage change vs prev_close for each symbol that quoted
         positive_moves: Dict[str, float] = {}
-        for sym, trade_price in first_trades.items():
+        for sym, quote_price in first_quotes.items():
             prev_close = prev_close_dict[sym]
-            pct_change = (trade_price / prev_close) - 1.0
-            logger.info(f"{sym}: post-open trade={trade_price:.2f}, prev_close={prev_close:.2f}, pct_change={pct_change*100:.2f}%")
+            pct_change = (quote_price / prev_close) - 1.0
+            logger.info(f"{sym}: post-open quote={quote_price:.2f}, prev_close={prev_close:.2f}, pct_change={pct_change*100:.2f}%")
             if pct_change > 0:
                 positive_moves[sym] = pct_change
 
@@ -301,7 +319,7 @@ def evaluate_groups_and_buy(api: AlpacaREST,
 
         # 3) Choose symbol with highest positive pct_change
         chosen_sym = max(positive_moves, key=positive_moves.get)
-        chosen_price = first_trades[chosen_sym]
+        chosen_price = first_quotes[chosen_sym]
         logger.info(f"Chosen to buy {chosen_sym} with pct_change={positive_moves[chosen_sym]*100:.2f}% at reference price {chosen_price:.2f}")
 
         # 4) Submit market buy for as many shares as cash allows
@@ -330,7 +348,7 @@ def evaluate_groups_and_buy(api: AlpacaREST,
                     time_in_force="day"
                 )
                 logger.info(f"SUBMITTED BUY {chosen_sym} | qty={order_qty} | order_id={order.id}")
-                actual_buy_price = chosen_price  # reference price = first post-open trade
+                actual_buy_price = chosen_price  # reference price = first post-open quote
                 return {
                     "symbol":    chosen_sym,
                     "buy_time":  datetime.now(TZ).replace(microsecond=0).isoformat(),
@@ -360,7 +378,7 @@ def evaluate_groups_and_buy(api: AlpacaREST,
     logger.info("No purchase executed across any group")
     return None
 
-def monitor_trade(api: AlpacaREST, buy_info: dict):
+def monitor_trade(api: AlpacaREST, fh_client: finnhub.Client, buy_info: dict):
     symbol    = buy_info["symbol"]
     qty       = buy_info["qty"]
     buy_price = buy_info["buy_price"]
@@ -377,18 +395,18 @@ def monitor_trade(api: AlpacaREST, buy_info: dict):
 
     while True:
         try:
-            trade = api.get_latest_trade(symbol)
-            price = trade.price
-            trade_dt = trade.timestamp.astimezone(TZ)
-            if price is None:
-                logger.debug(f"No price from latest_trade for {symbol}; skipping iteration")
+            quote = fh_client.quote(symbol)
+            price = quote.get('c')
+            trade_unix = quote.get('t')
+            if price is None or trade_unix is None:
+                logger.debug(f"No valid Finnhub quote for {symbol}; skipping iteration")
                 time.sleep(0.30)
                 continue
-
+            trade_dt = datetime.fromtimestamp(trade_unix, tz=timezone.utc).astimezone(TZ)
             now = datetime.now(TZ)
-            logger.debug(f"{symbol} latest trade at {trade_dt.time()} price {price:.2f}")
+            logger.debug(f"{symbol} latest quote at {trade_dt.time()} price {price:.2f}")
 
-            # (1) Time‐based exit (only if target not yet hit)
+            # (1) Time-based exit (only if target not yet hit)
             if not hit_target and now >= cutoff_time:
                 logger.info(f"{symbol} time cutoff reached at {now.time()}; selling at market")
                 sell = api.submit_order(
@@ -401,7 +419,7 @@ def monitor_trade(api: AlpacaREST, buy_info: dict):
                 logger.info(f"TIME‐EXIT SELL {symbol} | order_id={sell.id}")
                 break
 
-            # (2) Hard stop‐loss
+            # (2) Hard stop-loss
             if price <= buy_price * stop_loss_factor:
                 logger.info(f"{symbol} hit stop-loss at price {price:.2f} (<= {buy_price*stop_loss_factor:.2f}); selling")
                 sell = api.submit_order(
@@ -446,7 +464,7 @@ def monitor_trade(api: AlpacaREST, buy_info: dict):
             time.sleep(0.30)
             continue
 
-        # Poll every ~0.30 seconds for the latest executed trade
+        # Poll every ~0.30 seconds for the latest quote
         time.sleep(0.30)
 
     logger.info("Monitoring ended. Trading run completed.")
@@ -500,13 +518,13 @@ def main():
         logger.info("Market already OPEN at %s", clock.timestamp.astimezone(TZ))
 
     # 7) Evaluate each group and attempt to buy
-    buy_info = evaluate_groups_and_buy(alpaca_api, groups, prev_close_dict)
+    buy_info = evaluate_groups_and_buy(alpaca_api, fh_client, groups, prev_close_dict)
     if not buy_info:
         logger.error("No purchase succeeded across all groups; exiting")
         sys.exit(1)
 
     # 8) Monitor the trade (polling every 0.30s) and potentially sell
-    monitor_trade(alpaca_api, buy_info)
+    monitor_trade(alpaca_api, fh_client, buy_info)
 
 if __name__ == "__main__":
     main()
