@@ -33,7 +33,7 @@ MONITOR_END_MINUTE = 33 #end minute
 SURPRISE_THRESHOLD = 1 # % min earnings suprise
 MAX_SURPRISE       = 600 # man suprise
 MC_THRESHOLD       = 1_000_000 # market cap in millions of dollars
-best_pct_increase = 3.0  # Minimum threshold for % increase at open
+MIN_PCT_INCREASE   = 3.0  # Minimum threshold for % increase at open
 # ─── Logging Setup ────────────────────────────────────────────────────────────
 def configure_logging() -> logging.Logger:
     logger = logging.getLogger("earnings_trader")
@@ -201,17 +201,19 @@ async def pre_connect_and_wait_for_opening(
     prev_close: Dict[str, float]
 ) -> Optional[Dict[str, float]]:
     """
-    Pre-connect to WebSocket before market opens and wait for first trades.
-    Returns the first candidate that shows % gain at open (or the strongest if multiple arrive simultaneously)
+    Wait until market opens, then connect to WebSocket and wait for first trades.
     """
+    logger.info("Waiting for market to open before connecting to WebSocket...")
+    sleep_until_market_open(api)
+    
     uri = f"wss://ws.finnhub.io?token={key}"
-    logger.info(f"Pre-connecting to Finnhub WebSocket for {len(symbols)} symbols")
-    
+    logger.info(f"Market is open. Connecting to Finnhub WebSocket for {len(symbols)} symbols")
+
     best_candidate = None
-    
     pending_symbols = set(symbols)
     connection_attempts = 0
     max_attempts = 3
+
     
     while connection_attempts < max_attempts:
         try:
@@ -262,8 +264,8 @@ async def pre_connect_and_wait_for_opening(
                                         pct_increase = (price - prev_close[sym]) / prev_close[sym] * 100
                                         logger.info(f"{sym}: {pct_increase:.2f}% increase from previous close ${prev_close[sym]:.2f}")
                                         
-                                        if pct_increase > best_pct_increase:
-                                            best_pct_increase = pct_increase
+                                        if pct_increase > MIN_PCT_INCREASE:
+                                            MIN_PCT_INCREASE = pct_increase
                                             best_candidate = {
                                                 "symbol": sym,
                                                 "price": price,
@@ -561,14 +563,14 @@ def main():
 
     # Pre-connect to WebSocket and wait for opening prices
     symbols = [c["symbol"] for c in candidates]
-    logger.info("🔌 Pre-connecting to WebSocket before market open...")
+    logger.info("🔌 Waiting for market open to start WebSocket connection...")
     
     best_candidate = asyncio.run(pre_connect_and_wait_for_opening(
         symbols, FINNHUB_API_KEY, alp, prev_close
     ))
     
     if not best_candidate:
-        logger.error("❌ No candidates met the 3% increase threshold - exiting")
+        logger.error("❌ No candidates met the % increase threshold - exiting")
         sys.exit(1)
 
     # Execute buy order for the best candidate
