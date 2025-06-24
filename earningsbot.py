@@ -3,10 +3,10 @@ import sys
 import time
 import logging
 import asyncio
-import json
+import json  
 from dotenv import load_dotenv
 from datetime import datetime, date, timedelta
-#fix these comments when running on ubuntu
+#fix these comments when running on ubuntu aaa
 try:
     from zoneinfo import ZoneInfo  # Python 3.9+
 except ImportError:
@@ -78,19 +78,46 @@ def sleep_until_market_open(api: AlpacaREST):
     while True:
         clock = api.get_clock()
         logger.debug(f"Market status check: is_open={clock.is_open}, timestamp={clock.timestamp}")
+        
         if clock.is_open:
             logger.info("Market opened at %s", clock.timestamp.astimezone(TZ))
             return
-        next_open = clock.next_open.astimezone(TZ)
+        
+        # Convert next_open to a native datetime and normalize tz
+        next_open_raw = clock.next_open
+        if isinstance(next_open_raw, str):
+            # Handle 'Z' suffix and other ISO format variations
+            next_open_str = next_open_raw.replace('Z', '+00:00')
+            next_open = datetime.fromisoformat(next_open_str)
+        else:
+            next_open_str = str(next_open_raw).replace('Z', '+00:00')
+            next_open = datetime.fromisoformat(next_open_str)
+        
+        #  Always ensure timezone awareness
+        if next_open.tzinfo is None:
+            next_open = next_open.replace(tzinfo=ZoneInfo("UTC"))
+        
+        # Convert to target timezone
+        next_open = next_open.astimezone(TZ)
+        
         now = datetime.now(TZ)
-        secs = (next_open - now).total_seconds()
+        
+        try:
+            secs = (next_open - now).total_seconds()
+        except Exception as e:
+            logger.exception(f"❌ Failed to compute time delta: next_open={next_open}, now={now}")
+            raise e
+        
         logger.debug(f"Market closed. Now={now.time()}, Next open={next_open.time()} in {secs:.1f}s")
+        
         if secs > 300:
             logger.debug("Sleeping for 5 minutes until next check")
             time.sleep(300)
         else:
             logger.debug(f"Close to open time, sleeping for {max(0, secs):.1f}s")
             time.sleep(max(0, secs))
+
+
 
 def get_cutoff_time(today: date) -> datetime:
     cutoff = datetime(
@@ -194,118 +221,371 @@ def group_candidates_by_surprise(
                            for c in sorted_c))
     return sorted_c
 
-async def pre_connect_and_wait_for_opening(
+
+async def get_opening_prices_with_window(
     symbols: List[str], 
-    key: str,
+    finnhub_key: str,
     api: AlpacaREST,
-    prev_close: Dict[str, float]
+    prev_close: Dict[str, float],
+    window_seconds: int = 15,
+    max_rest_symbols: int = 50  # Limit REST API to most promising candidates
 ) -> Optional[Dict[str, float]]:
     """
-    Wait until market opens, then connect to WebSocket and wait for first trades.
+    Find opening prices with a two-phase approach:
+    1. Race to find the FIRST candidate that meets minimum criteria
+    2. Once found, wait 15 seconds to see if better candidates emerge
     """
-    logger.info("Waiting for market to open before connecting to WebSocket...")
+    logger.info("Waiting for market to open...")
     sleep_until_market_open(api)
+    time.sleep(1)
+    logger.info(f"Market is open. Racing to find first viable candidate from {len(symbols)} symbols")
     
-    uri = f"wss://ws.finnhub.io?token={key}"
-    logger.info(f"Market is open. Connecting to Finnhub WebSocket for {len(symbols)} symbols")
 
-    best_candidate = None
-    pending_symbols = set(symbols)
+    # For large candidate lists, prioritize WebSocket for all symbols
+    # but limit REST API to most promising subset to respect rate limits
+    rest_symbols = symbols[:max_rest_symbols] if len(symbols) > max_rest_symbols else symbols
+    
+    if len(symbols) > max_rest_symbols:
+        logger.info(f"Large candidate list detected. WebSocket: all {len(symbols)}, REST API: top {len(rest_symbols)}")
+    
+    # Shared state
+    results = {}
+    pending_symbols = set(symbols)  # WebSocket tracks all symbols
+    pending_rest_symbols = set(rest_symbols)  # REST API tracks subset
+    results_lock = asyncio.Lock()
+    first_viable_found = asyncio.Event()
+    first_viable_time = None
+    
+    # Start both data fetchers
+    websocket_task = asyncio.create_task(
+        websocket_price_fetcher(
+            symbols, finnhub_key, prev_close, results, pending_symbols, 
+            results_lock, first_viable_found,
+        )
+    )
+    
+    rest_api_task = asyncio.create_task(
+        rest_api_price_fetcher(
+            rest_symbols, finnhub_key, prev_close, results, pending_rest_symbols, 
+            results_lock, first_viable_found, max_calls_per_batch=45
+        )
+    )
+    
+    try:
+        # Phase 1: Wait for first viable candidate
+        logger.info(f"Phase 1: Racing to find first candidate with >{MIN_PCT_INCREASE}% increase...")
+        await first_viable_found.wait()
+        first_viable_time = time.monotonic()
+        
+        async with results_lock:
+            viable_candidates = [
+                (symbol, data) for symbol, data in results.items() 
+                if data["pct_increase"] >= MIN_PCT_INCREASE            ]
+        
+        logger.info(f"🎯 First viable candidate found! Starting {window_seconds}s window for better options...")
+        
+        # Phase 2: Wait additional time for potentially better candidates
+        window_start = time.monotonic()
+        while (time.monotonic() - window_start) < window_seconds:
+            await asyncio.sleep(0.1)
+            
+            # Check if we found significantly better candidates
+            async with results_lock:
+                current_viable = [
+                    (symbol, data) for symbol, data in results.items() 
+                    if data["pct_increase"] >= MIN_PCT_INCREASE
+                ]
+                
+                if len(current_viable) > len(viable_candidates):
+                    logger.info(f"Found {len(current_viable)} viable candidates so far...")
+                    viable_candidates = current_viable
+        
+        logger.info(f"Phase 2 complete. Final evaluation of {len(viable_candidates)} candidates.")
+        
+    finally:
+        # Cancel both tasks
+        websocket_task.cancel()
+        rest_api_task.cancel()
+        await asyncio.gather(websocket_task, rest_api_task, return_exceptions=True)
+    
+    # Select best candidate from viable options
+    return select_best_candidate(results, MIN_PCT_INCREASE)
+
+
+async def websocket_price_fetcher(
+    symbols: List[str], 
+    finnhub_key: str, 
+    prev_close: Dict[str, float],
+    results: Dict, 
+    pending_symbols: Set[str], 
+    results_lock: asyncio.Lock,
+    first_viable_found: asyncio.Event,
+):
+    
+    """WebSocket price fetching task"""
+    uri = f"wss://ws.finnhub.io?token={finnhub_key}"
     connection_attempts = 0
     max_attempts = 3
-
     
     while connection_attempts < max_attempts:
         try:
-            logger.debug(f"WebSocket connection attempt {connection_attempts + 1}/{max_attempts}")
+            logger.debug(f"WebSocket connection attempt {connection_attempts + 1}")
             async with websockets.connect(uri) as ws:
-                logger.info("WebSocket connected successfully, subscribing to symbols")
+                logger.info("WebSocket connected, subscribing to symbols")
                 
-                # Subscribe to all symbols while market is still closed
-                for s in symbols:
-                    subscribe_msg = json.dumps({"type": "subscribe", "symbol": s})
+                # Subscribe to all symbols
+                for symbol in symbols:
+                    subscribe_msg = json.dumps({"type": "subscribe", "symbol": symbol})
                     await ws.send(subscribe_msg)
-                    logger.debug(f"Pre-subscribed to {s}")
-                    await asyncio.sleep(0.1)  # Small delay between subscriptions
+                    await asyncio.sleep(0.05)
                 
-                logger.info("All symbols subscribed. Waiting for market open and first trades...")
+                logger.info("WebSocket ready, listening for trades...")
                 
-                # Check if market is open yet
-                clock = api.get_clock()
-                if not clock.is_open:
-                    next_open = clock.next_open.astimezone(TZ)
-                    logger.info(f"Market opens at {next_open.time()}, WebSocket ready and waiting...")
-                
-                message_count = 0
-                start_time = time.monotonic()
-                
-                # Wait for trades to start flowing
-                while pending_symbols:
+                while True:
                     try:
-                        # Set a reasonable timeout for each message
-                        raw = await asyncio.wait_for(ws.recv(), timeout=30.0)
-                        message_count += 1
-                        
-                        if message_count % 100 == 0:
-                            logger.debug(f"Processed {message_count} WebSocket messages, still waiting for: {pending_symbols}")
-                        
+                        raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
                         data = json.loads(raw)
                         
                         if data.get("type") == "trade":
-                            for t in data["data"]:
-                                sym, price, timestamp = t["s"], t["p"], t.get("t", 0)
-                                if sym in pending_symbols:
-                                    pending_symbols.remove(sym)
-                                    trade_time = datetime.fromtimestamp(timestamp / 1000, tz=TZ) if timestamp else "unknown"
-                                    logger.info(f"🎯 OPENING PRICE {sym} @ ${price:.2f} (time: {trade_time}")
-                                    
-                                    # Immediately check if this meets our 3% threshold
-                                    if sym in prev_close:
-                                        pct_increase = (price - prev_close[sym]) / prev_close[sym] * 100
-                                        logger.info(f"{sym}: {pct_increase:.2f}% increase from previous close ${prev_close[sym]:.2f}")
-                                        
-                                        if pct_increase > MIN_PCT_INCREASE:
-                                            MIN_PCT_INCREASE = pct_increase
-                                            best_candidate = {
-                                                "symbol": sym,
-                                                "price": price,
-                                                "pct_increase": pct_increase
-                                            }
-                                            logger.info(f"New best candidate: {sym} @ {pct_increase:.2f}%")
-                                    
-                                    if not pending_symbols:
-                                        logger.info("All opening prices processed!")
-                                        break
-                        
-                        elif data.get("type") == "ping":
-                            logger.debug("Received WebSocket ping")
+                            found_viable = await process_websocket_trades(
+                                data, prev_close, results, pending_symbols, 
+                                results_lock
+                            )
                             
-                        else:
-                            logger.debug(f"Received WebSocket message type: {data.get('type')}")
-                            
+                            # Signal if we found first viable candidate
+                            if found_viable and not first_viable_found.is_set():
+                                first_viable_found.set()
+                                
                     except asyncio.TimeoutError:
-                        clock = api.get_clock()
-                        logger.warning(f"No messages for 30s, market_open: {clock.is_open}, pending: {pending_symbols}")
-    
-                        # Only trigger after 9:35 AM if market is open
-                        if clock.is_open and datetime.now(TZ).time() >= datetime.strptime("09:35:00", "%H:%M:%S").time():
-                            logger.error("Market open for 5+ minutes but no trade data received")
-                            break
-                
-                return best_candidate
-                
+                        continue
+                        
+        except asyncio.CancelledError:
+            logger.debug("WebSocket task cancelled")
+            break
         except Exception as e:
             connection_attempts += 1
-            logger.error(f"WebSocket connection failed (attempt {connection_attempts}): {e}")
+            logger.error(f"WebSocket error (attempt {connection_attempts}): {e}")
             if connection_attempts < max_attempts:
-                logger.info(f"Retrying WebSocket connection in 5 seconds...")
-                await asyncio.sleep(5)
+                await asyncio.sleep(2)
             else:
-                logger.error("Max WebSocket connection attempts reached")
                 break
+
+
+async def rest_api_price_fetcher(
+    symbols: List[str], 
+    finnhub_key: str, 
+    prev_close: Dict[str, float],
+    results: Dict, 
+    pending_symbols: Set[str], 
+    results_lock: asyncio.Lock,
+    first_viable_found: asyncio.Event,
+    max_calls_per_batch: int = 45  # Stay under 50/min limit with safety margin
+):
+   
+    """REST API price fetching task with rate limit-aware batching"""
+    logger.info(f"Starting REST API price polling (max {max_calls_per_batch} calls per batch)...")
     
-    logger.warning(f"WebSocket connection failed after {max_attempts} attempts")
-    return best_candidate
+    # Initialize Finnhub client
+    finnhub_client = finnhub.Client(api_key=finnhub_key)
+    
+    poll_cycle = 0
+    batch_start_time = time.monotonic()
+    
+    try:
+        while True:
+            poll_cycle += 1
+            
+            # Get current pending symbols to poll
+            async with results_lock:
+                all_pending = list(pending_symbols)
+                if not all_pending:
+                    break
+            
+            logger.debug(f"REST cycle #{poll_cycle}: {len(all_pending)} total pending symbols")
+            
+            # Split symbols into rate-limit safe batches
+            symbol_batches = [
+                all_pending[i:i + max_calls_per_batch] 
+                for i in range(0, len(all_pending), max_calls_per_batch)
+            ]
+            
+            found_viable_this_cycle = False
+            
+            # Process each batch with rate limiting
+            for batch_idx, batch_symbols in enumerate(symbol_batches):
+                batch_start = time.monotonic()
+                
+                logger.debug(f"Processing batch {batch_idx + 1}/{len(symbol_batches)}: {len(batch_symbols)} symbols")
+                
+                # Poll all symbols in this batch
+                for symbol in batch_symbols:
+                    try:
+                        # Use Finnhub client to get quote
+                        quote_result = finnhub_client.quote(symbol)
+                        
+                        if quote_result and 'c' in quote_result:
+                            current_price = quote_result['c']
+                            if current_price > 0:
+                                viable = await process_rest_price(
+                                    symbol, current_price, prev_close, results, 
+                                    pending_symbols, results_lock
+                                )
+                                if viable:
+                                    found_viable_this_cycle = True
+                        
+                        # Small delay between individual API calls within batch
+                        await asyncio.sleep(0.02)
+                        
+                    except Exception as e:
+                        logger.debug(f"REST API error for {symbol}: {e}")
+                        continue
+                
+                # Rate limiting between batches
+                if batch_idx < len(symbol_batches) - 1:  # Not the last batch
+                    batch_duration = time.monotonic() - batch_start
+                    min_batch_time = len(batch_symbols) / 50.0  # 50 calls per minute max
+                    
+                    if batch_duration < min_batch_time:
+                        sleep_time = min_batch_time - batch_duration
+                        logger.debug(f"Rate limiting: sleeping {sleep_time:.2f}s between batches")
+                        await asyncio.sleep(sleep_time)
+            
+            # Signal if we found first viable candidate
+            if found_viable_this_cycle and not first_viable_found.is_set():
+                first_viable_found.set()
+            
+            # Determine cycle interval based on phase and remaining symbols
+            async with results_lock:
+                remaining_count = len(pending_symbols)
+            
+            if not first_viable_found.is_set():
+                # Phase 1: More frequent polling, but respect rate limits
+                if remaining_count <= max_calls_per_batch:
+                    # Single batch - can poll faster
+                    cycle_interval = max(1.2, remaining_count / 45.0)
+                else:
+                    # Multiple batches needed - longer interval
+                    cycle_interval = max(2.0, remaining_count / 40.0)
+            else:
+                # Phase 2: During 15s window, slower polling
+                cycle_interval = max(3.0, remaining_count / 30.0)
+            
+            logger.debug(f"Waiting {cycle_interval:.1f}s before next REST cycle ({remaining_count} symbols remaining)")
+            await asyncio.sleep(cycle_interval)
+                
+    except asyncio.CancelledError:
+        logger.debug("REST API task cancelled")
+
+
+async def process_websocket_trades(
+    data: Dict, 
+    prev_close: Dict[str, float], 
+    results: Dict, 
+    pending_symbols: Set[str], 
+    results_lock: asyncio.Lock,
+) -> bool:
+
+    """Process trade data from WebSocket, return True if viable candidate found"""
+    found_viable = False
+    
+    for trade in data.get("data", []):
+        symbol = trade.get("s")
+        price = trade.get("p")
+        timestamp = trade.get("t", 0)
+        
+        if symbol and price and symbol in pending_symbols:
+            async with results_lock:
+                if symbol in pending_symbols:
+                    pending_symbols.remove(symbol)
+                    
+                    pct_increase = calculate_percentage_increase(symbol, price, prev_close)
+                    results[symbol] = {
+                        "price": price,
+                        "pct_increase": pct_increase,
+                        "source": "websocket",
+                        "timestamp": timestamp
+                    }
+                    
+                    if pct_increase >= MIN_PCT_INCREASE:
+                        trade_time = datetime.fromtimestamp(timestamp / 1000) if timestamp else "now"
+                        logger.info(f"🔥 VIABLE WebSocket: {symbol} @ ${price:.2f} ({pct_increase:.2f}%) at {trade_time}")
+                        found_viable = True
+                    else:
+                        logger.info(f"📊 WebSocket: {symbol} @ ${price:.2f} ({pct_increase:.2f}%) - below threshold")
+    
+    return found_viable
+
+
+async def process_rest_price(
+    symbol: str, 
+    price: float, 
+    prev_close: Dict[str, float], 
+    results: Dict, 
+    pending_symbols: Set[str], 
+    results_lock: asyncio.Lock,
+) -> bool:
+    
+    """Process price data from REST API, return True if viable candidate found"""
+    async with results_lock:
+        if symbol in pending_symbols:
+            pending_symbols.remove(symbol)
+            
+            pct_increase = calculate_percentage_increase(symbol, price, prev_close)
+            results[symbol] = {
+                "price": price,
+                "pct_increase": pct_increase,
+                "source": "rest_api",
+                "timestamp": int(time.time() * 1000)
+            }
+            
+            if pct_increase >= MIN_PCT_INCREASE:
+                logger.info(f"🚀 VIABLE REST API: {symbol} @ ${price:.2f} ({pct_increase:.2f}%)")
+                return True
+            else:
+                logger.info(f"📊 REST API: {symbol} @ ${price:.2f} ({pct_increase:.2f}%) - below threshold")
+                return False
+    
+    return False
+
+
+def calculate_percentage_increase(symbol: str, price: float, prev_close: Dict[str, float]) -> float:
+    """Calculate percentage increase from previous close"""
+    if symbol in prev_close:
+        pct_increase = (price - prev_close[symbol]) / prev_close[symbol] * 100
+        return pct_increase
+    return 0.0
+
+
+def select_best_candidate(results: Dict) -> Optional[Dict[str, float]]:
+    
+    """Select the best candidate from viable results"""
+    viable_candidates = [
+        (symbol, data) for symbol, data in results.items() 
+        if data["pct_increase"] >= MIN_PCT_INCREASE
+    ]
+    
+    if not viable_candidates:
+        logger.warning("No viable candidates found meeting minimum criteria")
+        return None
+    
+    # Sort by percentage increase (descending)
+    viable_candidates.sort(key=lambda x: x[1]["pct_increase"], reverse=True)
+    
+    best_symbol, best_data = viable_candidates[0]
+    
+    logger.info(f"🏆 SELECTED: {best_symbol} @ {best_data['pct_increase']:.2f}% "
+               f"(${best_data['price']:.2f}, source: {best_data['source']})")
+    
+    if len(viable_candidates) > 1:
+        other_candidates = [(s, f"{d['pct_increase']:.2f}%") for s, d in viable_candidates[1:]]
+        logger.info(f"Other viable candidates: {other_candidates}")
+    
+    return {
+        "symbol": best_symbol,
+        "price": best_data["price"],
+        "pct_increase": best_data["pct_increase"],
+        "source": best_data["source"]
+    }
 
 def place_buy_order(api: AlpacaREST, symbol: str, price: float) -> dict:
     """
@@ -472,6 +752,7 @@ async def monitor_trade_ws(
                         await asyncio.to_thread(api.submit_order,
                             symbol=symbol, qty=qty, side="sell", type="market", time_in_force="day"
                         )
+                        await ws.close()  # <--- ensures clean disconnect
                         return
 
                     # STOP LOSS CHECK
@@ -481,6 +762,7 @@ async def monitor_trade_ws(
                         await asyncio.to_thread(api.submit_order,
                             symbol=symbol, qty=qty, side="sell", type="market", time_in_force="day"
                         )
+                        await ws.close()  # <--- ensures clean disconnect
                         return
 
                     # PROFIT TARGET CHECK
@@ -503,6 +785,7 @@ async def monitor_trade_ws(
                             await asyncio.to_thread(api.submit_order,
                                 symbol=symbol, qty=qty, side="sell", type="market", time_in_force="day"
                             )
+                            await ws.close()  # <--- ensures clean disconnect
                             return
 
         except Exception as e:
@@ -559,14 +842,18 @@ def main():
 
     # Check market status before proceeding
     clock = alp.get_clock()
-  
 
-    # Pre-connect to WebSocket and wait for opening prices
+    # Get opening prices using new dual-source approach
     symbols = [c["symbol"] for c in candidates]
-    logger.info("🔌 Waiting for market open to start WebSocket connection...")
+    logger.info("🔌 Starting dual-source price monitoring (WebSocket + REST API)...")
     
-    best_candidate = asyncio.run(pre_connect_and_wait_for_opening(
-        symbols, FINNHUB_API_KEY, alp, prev_close
+    best_candidate = asyncio.run(get_opening_prices_with_window(
+        symbols=symbols,
+        finnhub_key=FINNHUB_API_KEY,
+        api=alp,
+        prev_close=prev_close,
+        window_seconds=15,  # 15 second window after first viable candidate
+        max_rest_symbols=50  # Limit REST API to top 50 symbols
     ))
     
     if not best_candidate:
