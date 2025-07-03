@@ -6,7 +6,7 @@ import asyncio
 import json
 from dotenv import load_dotenv
 from datetime import datetime, date, timedelta
-#fix these comments when running on ubuntu aaabbc
+#fix these comments when running on ubuntu aaabbcc
 try:
     from zoneinfo import ZoneInfo  # Python 3.9+
 except ImportError:
@@ -807,7 +807,7 @@ async def monitor_trade_ws(
     entry_price: float
 ):
     """
-    Monitor the trade via WebSocket with enhanced logging
+    Monitor the trade via WebSocket with enhanced logging and order verification
     """
     cutoff = get_cutoff_time(datetime.now(TZ).date())
     hit_target = False
@@ -820,7 +820,34 @@ async def monitor_trade_ws(
     logger.info(f"Entry: ${entry_price:.2f}, Stop: ${entry_price * STOP_LOSS_FACTOR:.2f}, Target: ${entry_price * TARGET_FACTOR:.2f}")
     logger.info(f"Monitor until: {cutoff.time()}")
 
-    max_attempts = 3
+    # Helper function to verify sell order
+    async def verify_and_handle_sell(reason: str, price: float):
+        pnl = (price - entry_price) / entry_price * 100
+        logger.info(f"{reason}: {symbol} @ ${price:.2f} (P&L: {pnl:+.2f}%)")
+        
+        # Submit sell order
+        sell_order = await asyncio.to_thread(api.submit_order,
+            symbol=symbol, qty=qty, side="sell", type="market", time_in_force="day"
+        )
+        
+        # Verify the order was accepted for the full quantity
+        actual_sell_qty = int(sell_order.qty)
+        if actual_sell_qty != qty:
+            logger.error(f"❌ SELL ORDER MODIFIED: Requested {qty}, accepted {actual_sell_qty}")
+            logger.error(f"❌ REMAINING POSITION: {qty - actual_sell_qty} shares of {symbol}")
+            
+            # Check actual position after the order
+            try:
+                final_position = await asyncio.to_thread(api.get_position, symbol)
+                remaining_qty = int(final_position.qty)
+                if remaining_qty > 0:
+                    logger.error(f"❌ POSITION NOT FULLY CLOSED: {remaining_qty} shares remaining")
+            except Exception as e:
+                logger.warning(f"Could not verify final position: {e}")
+        else:
+            logger.info(f"✅ SELL ORDER ACCEPTED: {actual_sell_qty} shares")
+
+    max_attempts = 5
     attempt = 0
 
     while attempt < max_attempts:
@@ -850,22 +877,14 @@ async def monitor_trade_ws(
 
                     # TIME EXIT CHECK
                     if not hit_target and now >= cutoff:
-                        pnl = (price - entry_price) / entry_price * 100
-                        logger.info(f"⏰ TIME EXIT: {symbol} @ ${price:.2f} (P&L: {pnl:+.2f}%)")
-                        await asyncio.to_thread(api.submit_order,
-                            symbol=symbol, qty=qty, side="sell", type="market", time_in_force="day"
-                        )
-                        await ws.close()  # <--- ensures clean disconnect
+                        await verify_and_handle_sell("⏰ TIME EXIT", price)
+                        await ws.close()
                         return
 
                     # STOP LOSS CHECK
                     if price <= entry_price * STOP_LOSS_FACTOR:
-                        pnl = (price - entry_price) / entry_price * 100
-                        logger.info(f"🛑 STOP LOSS: {symbol} @ ${price:.2f} (P&L: {pnl:+.2f}%)")
-                        await asyncio.to_thread(api.submit_order,
-                            symbol=symbol, qty=qty, side="sell", type="market", time_in_force="day"
-                        )
-                        await ws.close()  # <--- ensures clean disconnect
+                        await verify_and_handle_sell("🛑 STOP LOSS", price)
+                        await ws.close()
                         return
 
                     # PROFIT TARGET CHECK
@@ -883,12 +902,8 @@ async def monitor_trade_ws(
                             logger.debug(f"New peak for {symbol}: ${old_peak:.2f} → ${peak:.2f}")
                         elif price < peak:
                             decline = (peak - price) / peak * 100
-                            pnl = (price - entry_price) / entry_price * 100
-                            logger.info(f"📉 TRAILING STOP: {symbol} @ ${price:.2f} (peak: ${peak:.2f}, decline: {decline:.2f}%, P&L: {pnl:+.2f}%)")
-                            await asyncio.to_thread(api.submit_order,
-                                symbol=symbol, qty=qty, side="sell", type="market", time_in_force="day"
-                            )
-                            await ws.close()  # <--- ensures clean disconnect
+                            await verify_and_handle_sell(f"📉 TRAILING STOP", price)
+                            await ws.close()
                             return
 
         except Exception as e:
