@@ -232,9 +232,7 @@ def group_candidates_by_surprise(
                            for c in sorted_c))
     return sorted_c
 
-
-
-# 1. Opening FUNCTION
+#1 Opening Function
 async def get_opening_prices_with_window(
     symbols: List[str],
     finnhub_key: str,
@@ -253,6 +251,15 @@ async def get_opening_prices_with_window(
     time.sleep(1)
     logger.info(f"Market is open. Racing to find first viable candidate from {len(symbols)} symbols")
 
+    # Calculate cutoff time (9:31:01 America/New_York)
+    now = datetime.now(TZ)
+    cutoff_time = now.replace(hour=9, minute=31, second=1, microsecond=0)
+    
+    # If we're already past cutoff, exit immediately
+    if now > cutoff_time:
+        logger.error(f"❌ Already past cutoff time of 9:31:01 ({cutoff_time}) - exiting")
+        raise RuntimeError("Already past cutoff time of 9:31:01")
+
     # For large candidate lists, prioritize WebSocket for all symbols
     # but limit REST API to most promising subset to respect rate limits
     rest_symbols = symbols[:max_rest_symbols] if len(symbols) > max_rest_symbols else symbols
@@ -266,36 +273,54 @@ async def get_opening_prices_with_window(
     pending_rest_symbols = set(rest_symbols)  # REST API tracks subset
     results_lock = asyncio.Lock()
     first_viable_found = asyncio.Event()
+    cutoff_reached = asyncio.Event()
     first_viable_time = None
+
+    # Start cutoff monitor task
+    cutoff_monitor_task = asyncio.create_task(
+        monitor_cutoff_time(cutoff_time, cutoff_reached)
+    )
 
     # Start both data fetchers
     websocket_task = asyncio.create_task(
         websocket_price_fetcher(
             symbols, finnhub_key, prev_close, results, pending_symbols,
-            results_lock, first_viable_found,
+            results_lock, first_viable_found, cutoff_reached
         )
     )
 
     rest_api_task = asyncio.create_task(
         rest_api_price_fetcher(
             rest_symbols, finnhub_key, prev_close, results, pending_rest_symbols,
-            results_lock, first_viable_found, api=api, max_calls_per_batch=45
+            results_lock, first_viable_found, cutoff_reached, api=api, max_calls_per_batch=45
         )
     )
 
     try:
-        # Phase 1: Wait for first viable candidate
+        # Phase 1: Wait for first viable candidate OR cutoff time
         logger.info(f"Phase 1: Racing to find first candidate with >{MIN_PCT_INCREASE}% increase...")
-        await first_viable_found.wait()
+        
+        # Wait for either first viable candidate or cutoff time
+        done, pending = await asyncio.wait(
+            [
+                asyncio.create_task(first_viable_found.wait()),
+                asyncio.create_task(cutoff_reached.wait())
+            ],
+            return_when=asyncio.FIRST_COMPLETED
+        )
+        
+        # Cancel any pending tasks
+        for task in pending:
+            task.cancel()
+        
+        # Check if cutoff was reached first
+        if cutoff_reached.is_set():
+            logger.error(f"❌ Cutoff time of 9:31:01 reached without finding viable candidates - exiting")
+            raise RuntimeError("No viable candidate found before 9:31:01")
+        
+        # First viable candidate was found
         first_viable_time = time.monotonic()
         
-        # Check if first viable was found before 9:31:01 America/New_York
-        now = datetime.now(TZ)
-        cutoff_time = now.replace(hour=9, minute=31, second=1, microsecond=0)
-        if now > cutoff_time:
-            logger.error(f"❌ First viable candidate was found after cutoff of 9:31:01 ({cutoff_time}) - exiting")
-            raise RuntimeError("No viable candidate found before 9:31:01")
-
         async with results_lock:
             viable_candidates = [
                 (symbol, data) for symbol, data in results.items()
@@ -307,6 +332,11 @@ async def get_opening_prices_with_window(
         # Phase 2: Wait additional time for potentially better candidates
         window_start = time.monotonic()
         while (time.monotonic() - window_start) < window_seconds:
+            # Check if cutoff time reached during window
+            if cutoff_reached.is_set():
+                logger.warning("Cutoff time reached during collection window - proceeding with current results")
+                break
+                
             await asyncio.sleep(0.1)
 
             # Check if we found significantly better candidates
@@ -323,10 +353,14 @@ async def get_opening_prices_with_window(
         logger.info(f"Phase 2 complete. Final evaluation of {len(viable_candidates)} candidates.")
 
     finally:
-        # Cancel both tasks
+        # Cancel all tasks
+        cutoff_monitor_task.cancel()
         websocket_task.cancel()
         rest_api_task.cancel()
-        await asyncio.gather(websocket_task, rest_api_task, return_exceptions=True)
+        await asyncio.gather(
+            cutoff_monitor_task, websocket_task, rest_api_task, 
+            return_exceptions=True
+        )
 
     # Select best candidate from viable options
     best_candidate = select_best_candidate(results, MIN_PCT_INCREASE)
@@ -335,7 +369,20 @@ async def get_opening_prices_with_window(
     return best_candidate
 
 
-# 2. WEBSOCKET FUNCTION WITH PING/PONG
+async def monitor_cutoff_time(cutoff_time: datetime, cutoff_reached: asyncio.Event):
+    """Monitor for cutoff time and signal when reached"""
+    while True:
+        now = datetime.now(TZ)
+        if now >= cutoff_time:
+            logger.info(f"Cutoff time {cutoff_time} reached")
+            cutoff_reached.set()
+            break
+        
+        # Check every 100ms for precision
+        await asyncio.sleep(0.1)
+
+
+# 2. WEBSOCKET FUNCTION WITH PING/PONG AND CUTOFF MONITORING
 async def websocket_price_fetcher(
     symbols: List[str],
     finnhub_key: str,
@@ -344,14 +391,20 @@ async def websocket_price_fetcher(
     pending_symbols: Set[str],
     results_lock: asyncio.Lock,
     first_viable_found: asyncio.Event,
+    cutoff_reached: asyncio.Event,
 ):
-    """WebSocket price fetching task with ping/pong monitoring"""
+    """WebSocket price fetching task with ping/pong monitoring and cutoff checking"""
     uri = f"wss://ws.finnhub.io?token={finnhub_key}"
     connection_attempts = 0
     max_attempts = 5
 
     while connection_attempts < max_attempts:
         try:
+            # Check if cutoff reached before attempting connection
+            if cutoff_reached.is_set():
+                logger.debug("WebSocket: Cutoff time reached, exiting")
+                break
+                
             logger.debug(f"WebSocket connection attempt {connection_attempts + 1}")
 
             # Add ping interval for connection monitoring
@@ -365,6 +418,11 @@ async def websocket_price_fetcher(
 
                 # Subscribe to all symbols
                 for symbol in symbols:
+                    # Check cutoff before each subscription
+                    if cutoff_reached.is_set():
+                        logger.debug("WebSocket: Cutoff reached during subscription, exiting")
+                        return
+                        
                     subscribe_msg = json.dumps({"type": "subscribe", "symbol": symbol})
                     await ws.send(subscribe_msg)
                     await asyncio.sleep(0.05)
@@ -376,9 +434,14 @@ async def websocket_price_fetcher(
                 heartbeat_interval = 30  # Log heartbeat every 30 seconds
 
                 while True:
+                    # Check cutoff time at start of each loop
+                    if cutoff_reached.is_set():
+                        logger.debug("WebSocket: Cutoff time reached, closing connection")
+                        break
+                        
                     try:
                         # Wait for message with timeout
-                        raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
+                        raw = await asyncio.wait_for(ws.recv(), timeout=1.0)  # Reduced timeout for faster cutoff response
                         last_message_time = time.monotonic()
 
                         data = json.loads(raw)
@@ -421,140 +484,78 @@ async def websocket_price_fetcher(
         except Exception as e:
             connection_attempts += 1
             logger.error(f"WebSocket error (attempt {connection_attempts}): {e}")
-            if connection_attempts < max_attempts:
+            if connection_attempts < max_attempts and not cutoff_reached.is_set():
                 await asyncio.sleep(2)
             else:
-                logger.error("Max WebSocket connection attempts reached")
+                logger.error("Max WebSocket connection attempts reached or cutoff time reached")
                 break
 
 
-# 3. CORRECTED REST API FUNCTION USING ALPACA
 async def rest_api_price_fetcher(
     symbols: List[str],
-    finnhub_key: str,  # Keep for consistency, but we'll use Alpaca
+    finnhub_key: str,
     prev_close: Dict[str, float],
     results: Dict,
     pending_symbols: Set[str],
     results_lock: asyncio.Lock,
     first_viable_found: asyncio.Event,
-    api: AlpacaREST,  # Add Alpaca API parameter
+    cutoff_reached: asyncio.Event,
+    api: AlpacaREST,
     max_calls_per_batch: int = 45
 ):
-    """REST API price fetching task using Alpaca's bars API for opening prices"""
-    logger.info(f"Starting Alpaca REST API price polling (max {max_calls_per_batch} calls per batch)...")
-
-    poll_cycle = 0
-
-    try:
-        while True:
-            poll_cycle += 1
-
-            # Get current pending symbols to poll
-            async with results_lock:
-                all_pending = list(pending_symbols)
-                if not all_pending:
-                    break
-
-            logger.debug(f"REST cycle #{poll_cycle}: {len(all_pending)} total pending symbols")
-
-            # Split symbols into rate-limit safe batches
-            symbol_batches = [
-                all_pending[i:i + max_calls_per_batch]
-                for i in range(0, len(all_pending), max_calls_per_batch)
-            ]
-
-            found_viable_this_cycle = False
-
-            # Process each batch with rate limiting
-            for batch_idx, batch_symbols in enumerate(symbol_batches):
-                logger.debug(f"Processing batch {batch_idx + 1}/{len(symbol_batches)}: {len(batch_symbols)} symbols")
-
+    """REST API price fetching task with cutoff monitoring"""
+    client = finnhub.Client(api_key=finnhub_key)
+    
+    while len(pending_symbols) > 0:
+        # Check cutoff time before each batch
+        if cutoff_reached.is_set():
+            logger.debug("REST API: Cutoff time reached, exiting")
+            break
+            
+        try:
+            # Process symbols in batches to respect rate limits
+            current_batch = list(pending_symbols)[:max_calls_per_batch]
+            logger.debug(f"REST API processing batch of {len(current_batch)} symbols")
+            
+            for symbol in current_batch:
+                # Check cutoff before each API call
+                if cutoff_reached.is_set():
+                    logger.debug("REST API: Cutoff reached during batch processing, exiting")
+                    return
+                    
                 try:
-                    # Get the current date for today's bars
-                    today = datetime.now().strftime('%Y-%m-%d')
-
-                    # Use Alpaca's get_bars for opening prices
-                    # Request 1-minute bars for today starting from market open
-                    bars_request = {
-                        'symbols': ','.join(batch_symbols),
-                        'timeframe': '1Min',
-                        'start': f'{today}T09:30:00-04:00',  # Market open
-                        'limit': 1,  # Just the first bar (opening minute)
-                        'adjustment': 'raw'
-                    }
-
-                    # Get bars from Alpaca
-                    bars_response = api.get_bars(**bars_request)
-
-                    # Process each symbol's opening bar
-                    for symbol in batch_symbols:
-                        if symbol in bars_response:
-                            bars = bars_response[symbol]
-                            if bars:
-                                # Use the opening price from the first minute bar
-                                opening_price = float(bars[0].o)  # Opening price of first bar
-
-                                viable = await process_rest_price(
-                                    symbol, opening_price, prev_close, results,
-                                    pending_symbols, results_lock
-                                )
-                                if viable:
-                                    found_viable_this_cycle = True
-
-                        # Small delay between individual API calls within batch
-                        await asyncio.sleep(0.02)
-
+                    # Get current price
+                    quote = client.quote(symbol)
+                    current_price = quote.get('c')
+                    
+                    if current_price and current_price > 0:
+                        # Use your existing helper function
+                        found_viable = await process_rest_price(
+                            symbol, current_price, prev_close, results, 
+                            pending_symbols, results_lock
+                        )
+                        
+                        # Signal if we found first viable candidate
+                        if found_viable and not first_viable_found.is_set():
+                            first_viable_found.set()
+                    
+                    # Rate limiting delay
+                    await asyncio.sleep(0.1)
+                    
                 except Exception as e:
-                    logger.debug(f"Alpaca REST API error for batch: {e}")
-                    # Fallback to individual symbol requests
-                    for symbol in batch_symbols:
-                        try:
-                            today = datetime.now().strftime('%Y-%m-%d')
-                            bars = api.get_bars(
-                                symbol,
-                                timeframe='1Min',
-                                start=f'{today}T09:30:00-04:00',
-                                limit=1,
-                                adjustment='raw'
-                            )
-
-                            if bars and len(bars) > 0:
-                                opening_price = float(bars[0].o)
-                                viable = await process_rest_price(
-                                    symbol, opening_price, prev_close, results,
-                                    pending_symbols, results_lock
-                                )
-                                if viable:
-                                    found_viable_this_cycle = True
-
-                            await asyncio.sleep(0.02)
-
-                        except Exception as e:
-                            logger.debug(f"Alpaca REST API error for {symbol}: {e}")
-                            continue
-
-                # Rate limiting between batches
-                if batch_idx < len(symbol_batches) - 1:
-                    await asyncio.sleep(1.5)  # Conservative rate limiting for Alpaca
-
-            # Signal if we found first viable candidate
-            if found_viable_this_cycle and not first_viable_found.is_set():
-                first_viable_found.set()
-
-            # Determine cycle interval
-            async with results_lock:
-                remaining_count = len(pending_symbols)
-
-            if not first_viable_found.is_set():
-                cycle_interval = 2.0  # Poll every 2 seconds during phase 1
-            else:
-                cycle_interval = 5.0  # Slower polling during phase 2
-
-            logger.debug(f"Waiting {cycle_interval:.1f}s before next REST cycle ({remaining_count} symbols remaining)")
-            await asyncio.sleep(cycle_interval)
-
-    except asyncio.CancelledError:
-        logger.debug("Alpaca REST API task cancelled")
+                    logger.debug(f"REST API error for {symbol}: {e}")
+                    continue
+            
+            # Wait between batches if there are more symbols and cutoff not reached
+            if len(pending_symbols) > 0 and not cutoff_reached.is_set():
+                await asyncio.sleep(2)
+                
+        except asyncio.CancelledError:
+            logger.debug("REST API task cancelled")
+            break
+        except Exception as e:
+            logger.error(f"REST API batch processing error: {e}")
+            await asyncio.sleep(1)
 
 
 #  HELPER FUNCTIONS
