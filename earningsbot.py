@@ -6,7 +6,7 @@ import asyncio
 import json
 from dotenv import load_dotenv
 from datetime import datetime, date, timedelta
-#fix these comments when running on ubuntu aaabbcc
+#fix these comments when running on ubuntu aaabbccd
 try:
     from zoneinfo import ZoneInfo  # Python 3.9+
 except ImportError:
@@ -17,6 +17,7 @@ import websockets
 import finnhub
 from alpaca_trade_api.rest import REST as AlpacaREST
 from typing import List, Dict, Set, Optional
+
 
 
 # ─── Constants & Configuration ───────────────────────────────────────────────
@@ -36,6 +37,10 @@ SURPRISE_THRESHOLD = 1 # % min earnings suprise
 MAX_SURPRISE       = 600 # man suprise
 MC_THRESHOLD       = 1_000_000 # market cap in millions of dollars
 MIN_PCT_INCREASE   = 3.0  # Minimum threshold for % increase at open
+
+ALPACA_WS_URL = "wss://stream.data.alpaca.markets/v2/iex"  # or v2/crypto or v2/stocks, adjust as needed
+ALPACA_MAX_SUBSCRIBE = 30
+ALPACA_SUBSCRIBE_WAIT = 5  # seconds wait per batch before switching
 # ─── Logging Setup ────────────────────────────────────────────────────────────
 def configure_logging() -> logging.Logger:
     logger = logging.getLogger("earnings_trader")
@@ -238,7 +243,7 @@ async def get_opening_prices_with_window(
     finnhub_key: str,
     api: AlpacaREST,
     prev_close: Dict[str, float],
-    window_seconds: int = 15,
+    window_seconds: int = 10,
     max_rest_symbols: int = 50
 ) -> Optional[Dict[str, float]]:
     """
@@ -261,7 +266,7 @@ async def get_opening_prices_with_window(
         raise RuntimeError("Already past cutoff time of 9:31:01")
 
     # For large candidate lists, prioritize WebSocket for all symbols
-    # but limit REST API to most promising subset to respect rate limits
+ 
     rest_symbols = symbols[:max_rest_symbols] if len(symbols) > max_rest_symbols else symbols
 
     if len(symbols) > max_rest_symbols:
@@ -289,12 +294,12 @@ async def get_opening_prices_with_window(
         )
     )
 
-    rest_api_task = asyncio.create_task(
-        rest_api_price_fetcher(
-            rest_symbols, finnhub_key, prev_close, results, pending_rest_symbols,
-            results_lock, first_viable_found, cutoff_reached, api=api, max_calls_per_batch=45
-        )
+    alpaca_ws_task = asyncio.create_task(
+    alpaca_websocket_price_fetcher(
+        symbols, APCA_KEY, APCA_SECRET, prev_close, results, pending_symbols,
+        results_lock, first_viable_found, cutoff_reached
     )
+)
 
     try:
         # Phase 1: Wait for first viable candidate OR cutoff time
@@ -356,9 +361,9 @@ async def get_opening_prices_with_window(
         # Cancel all tasks
         cutoff_monitor_task.cancel()
         websocket_task.cancel()
-        rest_api_task.cancel()
+        alpaca_ws_task.cancel()
         await asyncio.gather(
-            cutoff_monitor_task, websocket_task, rest_api_task, 
+            cutoff_monitor_task, websocket_task, alpaca_ws_task,
             return_exceptions=True
         )
 
@@ -369,10 +374,13 @@ async def get_opening_prices_with_window(
     return best_candidate
 
 
+
 async def monitor_cutoff_time(cutoff_time: datetime, cutoff_reached: asyncio.Event):
     """Monitor for cutoff time and signal when reached"""
     while True:
+        #REAL CLOCK
         now = datetime.now(TZ)
+       
         if now >= cutoff_time:
             logger.info(f"Cutoff time {cutoff_time} reached")
             cutoff_reached.set()
@@ -491,71 +499,164 @@ async def websocket_price_fetcher(
                 break
 
 
-async def rest_api_price_fetcher(
+async def alpaca_websocket_price_fetcher(
     symbols: List[str],
-    finnhub_key: str,
+    apca_key: str,
+    apca_secret: str,
     prev_close: Dict[str, float],
     results: Dict,
     pending_symbols: Set[str],
     results_lock: asyncio.Lock,
     first_viable_found: asyncio.Event,
-    cutoff_reached: asyncio.Event,
-    api: AlpacaREST,
-    max_calls_per_batch: int = 45
+    cutoff_reached: asyncio.Event
 ):
-    """REST API price fetching task with cutoff monitoring"""
-    client = finnhub.Client(api_key=finnhub_key)
-    
-    while len(pending_symbols) > 0:
-        # Check cutoff time before each batch
-        if cutoff_reached.is_set():
-            logger.debug("REST API: Cutoff time reached, exiting")
-            break
-            
+    """
+    Alpaca websocket price fetcher with 30-channel limit, rotation every 5 seconds,
+    and consistent logging + cutoff monitoring.
+    """
+    connection_attempts = 0
+    max_attempts = 5
+
+    # Alpaca market data stream endpoint
+    uri = ALPACA_WS_URL
+
+    while connection_attempts < max_attempts:
         try:
-            # Process symbols in batches to respect rate limits
-            current_batch = list(pending_symbols)[:max_calls_per_batch]
-            logger.debug(f"REST API processing batch of {len(current_batch)} symbols")
-            
-            for symbol in current_batch:
-                # Check cutoff before each API call
-                if cutoff_reached.is_set():
-                    logger.debug("REST API: Cutoff reached during batch processing, exiting")
-                    return
-                    
-                try:
-                    # Get current price
-                    quote = client.quote(symbol)
-                    current_price = quote.get('c')
-                    
-                    if current_price and current_price > 0:
-                        # Use your existing helper function
-                        found_viable = await process_rest_price(
-                            symbol, current_price, prev_close, results, 
-                            pending_symbols, results_lock
-                        )
-                        
-                        # Signal if we found first viable candidate
-                        if found_viable and not first_viable_found.is_set():
-                            first_viable_found.set()
-                    
-                    # Rate limiting delay
-                    await asyncio.sleep(0.1)
-                    
-                except Exception as e:
-                    logger.debug(f"REST API error for {symbol}: {e}")
-                    continue
-            
-            # Wait between batches if there are more symbols and cutoff not reached
-            if len(pending_symbols) > 0 and not cutoff_reached.is_set():
-                await asyncio.sleep(2)
+            if cutoff_reached.is_set():
+                logger.debug("Alpaca WS: Cutoff time reached before connection, exiting")
+                break
+
+            logger.debug(f"Alpaca WS connection attempt {connection_attempts + 1}")
+
+            async with websockets.connect(uri, ping_interval=20, ping_timeout=10, close_timeout=5) as ws:
+                logger.info("Alpaca WS connected, authenticating")
+
+                # authenticate
+                auth_msg = json.dumps({
+                    "action": "auth",
+                    "key": apca_key,
+                    "secret": apca_secret
+                })
+                await ws.send(auth_msg)
+
+                # wait for auth response
+                auth_resp = await ws.recv()
+                auth_data = json.loads(auth_resp)
+                logger.debug(f"Alpaca WS auth response: {auth_data}")
                 
+                # Fix: Check for the correct authentication response format
+                # Alpaca returns [{'T': 'success', 'msg': 'connected'}] for successful connection
+                # Then sends [{'T': 'success', 'msg': 'authenticated'}] after auth
+                if not auth_data or auth_data[0].get("T") != "success":
+                    raise RuntimeError(f"Alpaca WS auth failed: {auth_data}")
+                
+                # If we get 'connected' message, we need to wait for 'authenticated' message
+                if auth_data[0].get("msg") == "connected":
+                    logger.debug("Alpaca WS connected, waiting for authentication confirmation")
+                    # Wait for the actual authentication response
+                    auth_resp2 = await ws.recv()
+                    auth_data2 = json.loads(auth_resp2)
+                    logger.debug(f"Alpaca WS second auth response: {auth_data2}")
+                    
+                    if not auth_data2 or auth_data2[0].get("msg") != "authenticated":
+                        raise RuntimeError(f"Alpaca WS authentication failed: {auth_data2}")
+                
+                elif auth_data[0].get("msg") == "authenticated":
+                    logger.debug("Alpaca WS authenticated in single response")
+                else:
+                    raise RuntimeError(f"Alpaca WS unexpected auth response: {auth_data}")
+
+                logger.info("Alpaca WS authenticated successfully")
+
+                # start subscribing in chunks of 30
+                chunk_size = 30
+                current_chunk_idx = 0
+                num_chunks = (len(symbols) + chunk_size - 1) // chunk_size
+                last_message_time = time.monotonic()
+                heartbeat_interval = 30
+
+                while not cutoff_reached.is_set():
+                    # calculate current chunk
+                    chunk_start = current_chunk_idx * chunk_size
+                    chunk_symbols = symbols[chunk_start:chunk_start + chunk_size]
+                    if not chunk_symbols:
+                        break
+
+                    # subscribe
+                    subscribe_msg = json.dumps({
+                        "action": "subscribe",
+                        "trades": chunk_symbols
+                    })
+                    await ws.send(subscribe_msg)
+                    logger.info(f"Alpaca WS subscribed to symbols: {chunk_symbols}")
+
+                    chunk_start_time = time.monotonic()
+
+                    while not cutoff_reached.is_set():
+                        # rotate after 5 seconds
+                        if time.monotonic() - chunk_start_time > 5:
+                            unsub_msg = json.dumps({
+                                "action": "unsubscribe",
+                                "trades": chunk_symbols
+                            })
+                            await ws.send(unsub_msg)
+                            logger.info(f"Alpaca WS unsubscribed from symbols: {chunk_symbols}")
+
+                            current_chunk_idx = (current_chunk_idx + 1) % num_chunks
+                            break  # move to next chunk
+
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                            last_message_time = time.monotonic()
+                            data = json.loads(raw)
+
+                            for msg in data:
+                                if msg.get("T") == "t":  # trade
+                                    # normalize to finnhub-style structure
+                                    adapted_data = {
+                                        "data": [
+                                            {
+                                                "s": msg["S"],
+                                                "p": msg["p"],
+                                                "t": msg["t"]
+                                            }
+                                        ]
+                                    }
+                                    found_viable = await process_websocket_trades(
+                                        adapted_data, prev_close, results,
+                                        pending_symbols, results_lock
+                                    )
+
+                                    if found_viable and not first_viable_found.is_set():
+                                        first_viable_found.set()
+
+                                elif msg.get("T") == "error":
+                                    logger.warning(f"Alpaca WS error message: {msg}")
+                                elif msg.get("T") in ["subscription", "success"]:
+                                    logger.debug(f"Alpaca WS status: {msg}")
+                        except asyncio.TimeoutError:
+                            # heartbeat logging
+                            current_time = time.monotonic()
+                            if current_time - last_message_time > heartbeat_interval:
+                                logger.debug("Alpaca WS waiting for data (connection alive)")
+                                last_message_time = current_time
+                            continue
+
+                # once cutoff or finished
+                logger.debug("Alpaca WS exiting main loop")
+                break  # successful run, do not reconnect
+
         except asyncio.CancelledError:
-            logger.debug("REST API task cancelled")
+            logger.debug("Alpaca WS task cancelled")
             break
         except Exception as e:
-            logger.error(f"REST API batch processing error: {e}")
-            await asyncio.sleep(1)
+            connection_attempts += 1
+            logger.error(f"Alpaca WS error (attempt {connection_attempts}): {e}")
+            if connection_attempts < max_attempts and not cutoff_reached.is_set():
+                await asyncio.sleep(2)
+            else:
+                logger.error("Max Alpaca WS connection attempts reached or cutoff time reached")
+                break
 
 
 #  HELPER FUNCTIONS
@@ -587,8 +688,20 @@ async def process_websocket_trades(
                         "timestamp": timestamp
                     }
 
+                    # ✅ FIX: Robust handling for both Finnhub (int) and Alpaca (str) timestamps
+                    if timestamp:
+                        if isinstance(timestamp, str):
+                            try:
+                                trade_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                            except Exception as e:
+                                logger.warning(f"Invalid timestamp format: {timestamp} ({e})")
+                                trade_time = "now"
+                        else:
+                            trade_time = datetime.fromtimestamp(timestamp / 1000)
+                    else:
+                        trade_time = "now"
+
                     if pct_increase >= MIN_PCT_INCREASE:
-                        trade_time = datetime.fromtimestamp(timestamp / 1000) if timestamp else "now"
                         logger.info(f"🔥 VIABLE WebSocket: {symbol} @ ${price:.2f} ({pct_increase:.2f}%) at {trade_time}")
                         found_viable = True
                     else:
@@ -596,36 +709,6 @@ async def process_websocket_trades(
 
     return found_viable
 
-
-async def process_rest_price(
-    symbol: str,
-    price: float,
-    prev_close: Dict[str, float],
-    results: Dict,
-    pending_symbols: Set[str],
-    results_lock: asyncio.Lock,
-) -> bool:
-    """Process price data from REST API, return True if viable candidate found"""
-    async with results_lock:
-        if symbol in pending_symbols:
-            pending_symbols.remove(symbol)
-
-            pct_increase = calculate_percentage_increase(symbol, price, prev_close)
-            results[symbol] = {
-                "price": price,
-                "pct_increase": pct_increase,
-                "source": "rest_api",
-                "timestamp": int(time.time() * 1000)
-            }
-
-            if pct_increase >= MIN_PCT_INCREASE:
-                logger.info(f"🚀 VIABLE REST API: {symbol} @ ${price:.2f} ({pct_increase:.2f}%)")
-                return True
-            else:
-                logger.info(f"📊 REST API: {symbol} @ ${price:.2f} ({pct_increase:.2f}%) - below threshold")
-                return False
-
-    return False
 
 
 def calculate_percentage_increase(symbol: str, price: float, prev_close: Dict[str, float]) -> float:
@@ -695,6 +778,7 @@ def evaluate_candidates_and_buy(
     """
     # REAL CLOCK !!!
     clock = api.get_clock()
+
     if not clock.is_open:
         logger.info("Market not open yet — waiting before placing buy order...")
         sleep_until_market_open(api)
@@ -737,11 +821,10 @@ def place_buy_order(api: AlpacaREST, symbol: str, price: float) -> dict:
         )
         logger.info(f"Order submitted with ID: {order.id}")
 
-        # Wait for fill with timeout
+        # Poll continuously until status changes from "new"
         poll_count = 0
-        max_polls = 30  # 30 * 0.5s = 15 second timeout
 
-        while poll_count < max_polls:
+        while True:
             o = api.get_order(order.id)
             logger.debug(f"Order {order.id} status={o.status} (poll {poll_count + 1})")
 
@@ -760,15 +843,12 @@ def place_buy_order(api: AlpacaREST, symbol: str, price: float) -> dict:
                 return {}
 
             poll_count += 1
+            # Sleep for 0.5 seconds to respect 200 requests/min rate limit 
             time.sleep(0.5)
-
-        logger.error(f"Order {order.id} timeout after {max_polls * 0.5}s")
-        return {}
 
     except Exception as e:
         logger.error(f"Buy order failed for {symbol}: {e}")
         return {}
-
 
 def preload_prev_closes(
     api: AlpacaREST,
@@ -805,39 +885,39 @@ async def monitor_trade_ws(
     api: AlpacaREST,
     symbol: str,
     qty: int,
-    entry_price: float
+    entry_price: float,
+    finnhub_key: str,
+    apca_key: str,
+    apca_secret: str
 ):
     """
-    Monitor the trade via WebSocket with enhanced logging and order verification
+    Monitor the trade via BOTH Alpaca and Finnhub websockets with enhanced logging and order verification.
     """
+
     cutoff = get_cutoff_time(datetime.now(TZ).date())
     hit_target = False
     peak = entry_price
     tick_count = 0
     last_log_time = time.monotonic()
 
-    uri = f"wss://ws.finnhub.io?token={FINNHUB_API_KEY}"
     logger.info(f"🔍 Starting trade monitoring for {symbol}")
     logger.info(f"Entry: ${entry_price:.2f}, Stop: ${entry_price * STOP_LOSS_FACTOR:.2f}, Target: ${entry_price * TARGET_FACTOR:.2f}")
     logger.info(f"Monitor until: {cutoff.time()}")
 
-    # Helper function to verify sell order
+    # shared price state
+    latest_price = entry_price
+    price_lock = asyncio.Lock()
+
     async def verify_and_handle_sell(reason: str, price: float):
         pnl = (price - entry_price) / entry_price * 100
         logger.info(f"{reason}: {symbol} @ ${price:.2f} (P&L: {pnl:+.2f}%)")
-        
-        # Submit sell order
+
         sell_order = await asyncio.to_thread(api.submit_order,
             symbol=symbol, qty=qty, side="sell", type="market", time_in_force="day"
         )
-        
-        # Verify the order was accepted for the full quantity
         actual_sell_qty = int(sell_order.qty)
         if actual_sell_qty != qty:
             logger.error(f"❌ SELL ORDER MODIFIED: Requested {qty}, accepted {actual_sell_qty}")
-            logger.error(f"❌ REMAINING POSITION: {qty - actual_sell_qty} shares of {symbol}")
-            
-            # Check actual position after the order
             try:
                 final_position = await asyncio.to_thread(api.get_position, symbol)
                 remaining_qty = int(final_position.qty)
@@ -848,74 +928,123 @@ async def monitor_trade_ws(
         else:
             logger.info(f"✅ SELL ORDER ACCEPTED: {actual_sell_qty} shares")
 
-    max_attempts = 5
-    attempt = 0
+    async def finnhub_ws():
+        uri = f"wss://ws.finnhub.io?token={finnhub_key}"
+        attempt = 0
+        max_attempts = 5
 
-    while attempt < max_attempts:
-        try:
-            async with websockets.connect(uri) as ws:
-                attempt = 0  # Reset attempt counter on successful connection
-                await ws.send(json.dumps({"type": "subscribe", "symbol": symbol}))
-                logger.debug(f"Subscribed to monitoring feed for {symbol}")
+        while attempt < max_attempts:
+            try:
+                async with websockets.connect(uri) as ws:
+                    await ws.send(json.dumps({"type": "subscribe", "symbol": symbol}))
+                    logger.debug("Finnhub WS subscribed")
+                    attempt = 0
 
-                async for raw in ws:
-                    data = json.loads(raw)
-                    if data.get("type") != "trade":
-                        continue
+                    async for raw in ws:
+                        data = json.loads(raw)
+                        if data.get("type") != "trade":
+                            continue
+                        price = data["data"][-1]["p"]
+                        async with price_lock:
+                            latest_price = price
+                        logger.debug(f"Finnhub tick: {symbol} @ {price:.2f}")
+            except Exception as e:
+                attempt += 1
+                if attempt < max_attempts:
+                    logger.warning(f"Finnhub WS error {e}, reconnecting...")
+                    await asyncio.sleep(5)
+                else:
+                    logger.error("Finnhub WS max attempts reached")
+                    break
 
-                    price = data["data"][-1]["p"]
-                    now = datetime.now(TZ)
-                    tick_count += 1
+    async def alpaca_ws():
+        uri = "wss://stream.data.alpaca.markets/v2/iex"
+        attempt = 0
+        max_attempts = 5
 
-                    # Log every 100 ticks or every 60 seconds
-                    current_time = time.monotonic()
-                    if tick_count % 100 == 0 or (current_time - last_log_time) > 60:
-                        pnl = (price - entry_price) / entry_price * 100
-                        logger.info(f"📊 {symbol} @ ${price:.2f} (P&L: {pnl:+.2f}%) [tick #{tick_count}]")
-                        last_log_time = current_time
-                    else:
-                        logger.debug(f"Tick {symbol} @ ${price:.2f} time={now.time()}")
-
-                    # TIME EXIT CHECK
-                    if not hit_target and now >= cutoff:
-                        await verify_and_handle_sell("⏰ TIME EXIT", price)
-                        await ws.close()
+        while attempt < max_attempts:
+            try:
+                async with websockets.connect(uri) as ws:
+                    auth_msg = json.dumps({
+                        "action": "auth",
+                        "key": apca_key,
+                        "secret": apca_secret
+                    })
+                    await ws.send(auth_msg)
+                    auth_resp = json.loads(await ws.recv())
+                    if auth_resp[0].get("msg") != "authenticated":
+                        logger.error("Alpaca WS auth failed")
                         return
 
-                    # STOP LOSS CHECK
-                    if price <= entry_price * STOP_LOSS_FACTOR:
-                        await verify_and_handle_sell("🛑 STOP LOSS", price)
-                        await ws.close()
-                        return
+                    await ws.send(json.dumps({
+                        "action": "subscribe",
+                        "trades": [symbol]
+                    }))
+                    logger.debug("Alpaca WS subscribed")
 
-                    # PROFIT TARGET CHECK
-                    if not hit_target and price >= entry_price * TARGET_FACTOR:
-                        hit_target = True
-                        peak = price
-                        pnl = (price - entry_price) / entry_price * 100
-                        logger.info(f"🎯 TARGET HIT: {symbol} @ ${price:.2f} (P&L: {pnl:+.2f}%) - Now trailing...")
+                    attempt = 0
 
-                    # TRAILING STOP LOGIC
-                    if hit_target:
-                        if price > peak:
-                            old_peak = peak
-                            peak = price
-                            logger.debug(f"New peak for {symbol}: ${old_peak:.2f} → ${peak:.2f}")
-                        elif price < peak:
-                            decline = (peak - price) / peak * 100
-                            await verify_and_handle_sell(f"📉 TRAILING STOP", price)
-                            await ws.close()
-                            return
+                    async for raw in ws:
+                        data = json.loads(raw)
+                        for msg in data:
+                            if msg.get("T") == "t":
+                                price = msg["p"]
+                                async with price_lock:
+                                    latest_price = price
+                                logger.debug(f"Alpaca tick: {symbol} @ {price:.2f}")
+            except Exception as e:
+                attempt += 1
+                if attempt < max_attempts:
+                    logger.warning(f"Alpaca WS error {e}, reconnecting...")
+                    await asyncio.sleep(5)
+                else:
+                    logger.error("Alpaca WS max attempts reached")
+                    break
 
-        except Exception as e:
-            attempt += 1
-            if attempt < max_attempts:
-                logger.warning(f"WebSocket connection failed (attempt {attempt}/{max_attempts}): {e}")
-                logger.info("Reconnecting in 5 seconds...")
-                await asyncio.sleep(5)
-            else:
-                logger.error(f"Max WebSocket connection attempts reached ({max_attempts})")
+    # launch both websocket tasks
+    fh_task = asyncio.create_task(finnhub_ws())
+    alpaca_task = asyncio.create_task(alpaca_ws())
+
+    try:
+        while True:
+            await asyncio.sleep(0.1)
+            async with price_lock:
+                price = latest_price
+            now = datetime.now(TZ)
+            tick_count += 1
+
+            # periodic logging
+            current_time = time.monotonic()
+            if tick_count % 100 == 0 or (current_time - last_log_time) > 60:
+                pnl = (price - entry_price) / entry_price * 100
+                logger.info(f"📊 {symbol} @ ${price:.2f} (P&L: {pnl:+.2f}%) [tick #{tick_count}]")
+                last_log_time = current_time
+
+            # exit conditions
+            if not hit_target and now >= cutoff:
+                await verify_and_handle_sell("⏰ TIME EXIT", price)
                 break
+            if price <= entry_price * STOP_LOSS_FACTOR:
+                await verify_and_handle_sell("🛑 STOP LOSS", price)
+                break
+            if not hit_target and price >= entry_price * TARGET_FACTOR:
+                hit_target = True
+                peak = price
+                pnl = (price - entry_price) / entry_price * 100
+                logger.info(f"🎯 TARGET HIT: {symbol} @ ${price:.2f} (P&L: {pnl:+.2f}%) - Now trailing...")
+            if hit_target:
+                if price > peak:
+                    old_peak = peak
+                    peak = price
+                    logger.debug(f"New peak for {symbol}: ${old_peak:.2f} → ${peak:.2f}")
+                elif price < peak:
+                    decline = (peak - price) / peak * 100
+                    await verify_and_handle_sell("📉 TRAILING STOP", price)
+                    break
+    finally:
+        fh_task.cancel()
+        alpaca_task.cancel()
+        await asyncio.gather(fh_task, alpaca_task, return_exceptions=True)
 
     logger.info(f"✅ Trade monitoring completed for {symbol}")
 
@@ -995,7 +1124,7 @@ def main():
     entry = float(buy_order["filled_avg_price"])
 
     logger.info(f"🎯 Now monitoring position: {qty} shares of {sym} @ ${entry:.2f}")
-    asyncio.run(monitor_trade_ws(alp, sym, qty, entry))
+    asyncio.run(monitor_trade_ws(alp, sym, qty, entry, FINNHUB_API_KEY, APCA_KEY, APCA_SECRET))
 
     logger.info("🏁 Trading session completed")
 
