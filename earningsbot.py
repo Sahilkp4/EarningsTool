@@ -6,7 +6,7 @@ import asyncio
 import json
 from dotenv import load_dotenv
 from datetime import datetime, date, timedelta
-#fix these comments when running on ubuntu aaabbccd
+#fix these comments when running on ubuntu aaabbccdd
 try:
     from zoneinfo import ZoneInfo  # Python 3.9+
 except ImportError:
@@ -37,6 +37,7 @@ SURPRISE_THRESHOLD = 1 # % min earnings suprise
 MAX_SURPRISE       = 600 # man suprise
 MC_THRESHOLD       = 1_000_000 # market cap in millions of dollars
 MIN_PCT_INCREASE   = 3.0  # Minimum threshold for % increase at open
+TRAIL_PERCENT      = 0.001  # 0.1%- very tight trailing stop
 
 ALPACA_WS_URL = "wss://stream.data.alpaca.markets/v2/iex"  # or v2/crypto or v2/stocks, adjust as needed
 ALPACA_MAX_SUBSCRIBE = 30
@@ -801,7 +802,8 @@ def place_buy_order(api: AlpacaREST, symbol: str, price: float) -> dict:
     """
     1) Submit market buy.
     2) Poll until filled.
-    3) Return dict with symbol, qty, and actual filled_avg_price.
+    3) Place stop loss order at STOP_LOSS_FACTOR of filled price.
+    4) Return dict with symbol, qty, actual filled_avg_price, and stop_loss_order_id.
     """
     try:
         account = api.get_account()
@@ -832,11 +834,30 @@ def place_buy_order(api: AlpacaREST, symbol: str, price: float) -> dict:
                 filled_price = float(o.filled_avg_price)
                 filled_qty = int(o.filled_qty)
                 logger.info(f"🎉 Order {order.id} FILLED: {filled_qty} shares @ ${filled_price:.2f}")
+                
+                # Place stop loss order
+                stop_loss_price = filled_price * STOP_LOSS_FACTOR
+                try:
+                    stop_loss_order = api.submit_order(
+                        symbol=symbol,
+                        qty=filled_qty,
+                        side="sell",
+                        type="stop",
+                        stop_price=stop_loss_price,
+                        time_in_force="gtc"  # Good Till Canceled
+                    )
+                    logger.info(f"Stop loss order placed: {symbol} qty={filled_qty} @ ${stop_loss_price:.2f} (ID: {stop_loss_order.id})")
+                    stop_loss_order_id = stop_loss_order.id
+                except Exception as e:
+                    logger.error(f"Failed to place stop loss order for {symbol}: {e}")
+                    stop_loss_order_id = None
+                
                 return {
                     "symbol": symbol,
                     "qty": filled_qty,
                     "filled_avg_price": filled_price,
-                    "order_id": order.id
+                    "order_id": order.id,
+                    "stop_loss_order_id": stop_loss_order_id
                 }
             elif o.status in ["rejected", "canceled", "expired"]:
                 logger.error(f"Order {order.id} failed with status: {o.status}")
@@ -881,6 +902,9 @@ def preload_prev_closes(
     logger.info(f"Successfully loaded {len(out)} previous closes")
     return out
 
+
+
+
 async def monitor_trade_ws(
     api: AlpacaREST,
     symbol: str,
@@ -892,6 +916,7 @@ async def monitor_trade_ws(
 ):
     """
     Monitor the trade via BOTH Alpaca and Finnhub websockets with enhanced logging and order verification.
+    Now includes automatic trailing stop loss order submission when target is hit.
     """
 
     cutoff = get_cutoff_time(datetime.now(TZ).date())
@@ -899,34 +924,147 @@ async def monitor_trade_ws(
     peak = entry_price
     tick_count = 0
     last_log_time = time.monotonic()
+    alpaca_trailing_stop_order = None  # Track the trailing stop order
 
     logger.info(f"🔍 Starting trade monitoring for {symbol}")
     logger.info(f"Entry: ${entry_price:.2f}, Stop: ${entry_price * STOP_LOSS_FACTOR:.2f}, Target: ${entry_price * TARGET_FACTOR:.2f}")
     logger.info(f"Monitor until: {cutoff.time()}")
 
     # shared price state
-    latest_price = entry_price
+    latest_price = {"value": entry_price}
     price_lock = asyncio.Lock()
 
     async def verify_and_handle_sell(reason: str, price: float):
         pnl = (price - entry_price) / entry_price * 100
         logger.info(f"{reason}: {symbol} @ ${price:.2f} (P&L: {pnl:+.2f}%)")
 
-        sell_order = await asyncio.to_thread(api.submit_order,
-            symbol=symbol, qty=qty, side="sell", type="market", time_in_force="day"
-        )
-        actual_sell_qty = int(sell_order.qty)
-        if actual_sell_qty != qty:
-            logger.error(f"❌ SELL ORDER MODIFIED: Requested {qty}, accepted {actual_sell_qty}")
+        # Cancel any existing trailing stop order first
+        if alpaca_trailing_stop_order:
             try:
-                final_position = await asyncio.to_thread(api.get_position, symbol)
-                remaining_qty = int(final_position.qty)
-                if remaining_qty > 0:
-                    logger.error(f"❌ POSITION NOT FULLY CLOSED: {remaining_qty} shares remaining")
+                await asyncio.to_thread(api.cancel_order, alpaca_trailing_stop_order.id)
+                logger.info("📤 Cancelled existing trailing stop order")
             except Exception as e:
-                logger.warning(f"Could not verify final position: {e}")
-        else:
-            logger.info(f"✅ SELL ORDER ACCEPTED: {actual_sell_qty} shares")
+                logger.warning(f"⚠️ Could not cancel trailing stop order: {e}")
+
+        # First, check if we actually have any shares to sell
+        try:
+            current_position = await asyncio.to_thread(api.get_position, symbol)
+            remaining_qty = int(current_position.qty)
+            if remaining_qty == 0:
+                logger.info("✅ No shares to sell - position already closed (likely by Alpaca's built-in orders)")
+                return
+            logger.info(f"📊 Current position: {remaining_qty} shares")
+        except Exception as e:
+            logger.info(f"✅ No position found - likely already closed by Alpaca's built-in orders: {e}")
+            return
+
+        max_retries = 100
+        attempt = 0
+
+        while remaining_qty > 0 and attempt <= max_retries:
+            try:
+                # Submit the sell order for remaining shares
+                sell_order = await asyncio.to_thread(
+                    api.submit_order,
+                    symbol=symbol,
+                    qty=remaining_qty,
+                    side="sell",
+                    type="market",
+                    time_in_force="day"
+                )
+                logger.info(f"📤 Sell order attempt #{attempt + 1}: Submitted {remaining_qty}")
+
+                await asyncio.sleep(2)  # allow time for order to partially/fully fill
+
+                # Retrieve actual filled amount
+                fetched_order = await asyncio.to_thread(api.get_order, sell_order.id)
+                filled_qty = int(fetched_order.filled_qty or 0)
+                logger.info(f"✅ Order filled {filled_qty} / {remaining_qty} on attempt #{attempt + 1}")
+
+                # Subtract filled qty from remaining
+                remaining_qty -= filled_qty
+
+                # If anything remains, confirm via position lookup
+                if remaining_qty > 0:
+                    try:
+                        final_position = await asyncio.to_thread(api.get_position, symbol)
+                        current_pos = int(final_position.qty)
+                        logger.warning(f"⚠️ Still holding {current_pos} shares after attempt #{attempt + 1}")
+                        remaining_qty = current_pos  # sync with actual position in case of discrepancy
+                    except Exception as e:
+                        logger.warning(f"Could not verify position on attempt #{attempt + 1}: {e}")
+                        # If position can't be verified, assume remaining_qty as-is and retry
+                else:
+                    logger.info(f"✅ POSITION FULLY CLOSED on attempt #{attempt + 1}")
+                    break
+
+            except Exception as e:
+                logger.error(f"❌ Sell order failed on attempt #{attempt + 1}: {e}")
+
+                # If the error suggests no position exists, break out of the loop
+                if "position does not exist" in str(e).lower() or "insufficient shares" in str(e).lower():
+                    logger.info(f"✅ Position appears to be already closed based on error: {e}")
+                    break
+
+            attempt += 1
+
+        if remaining_qty > 0:
+            logger.critical(f"🚨 UNABLE TO FULLY EXIT POSITION: {remaining_qty} shares remaining after {max_retries} retries")
+
+    async def submit_trailing_stop_order(current_price: float):
+        """Submit a trailing stop loss order to Alpaca when target is hit"""
+        nonlocal alpaca_trailing_stop_order
+        
+        try:
+            # Check current position to get exact quantity
+            current_position = await asyncio.to_thread(api.get_position, symbol)
+            position_qty = int(current_position.qty)
+            
+            if position_qty == 0:
+                logger.warning("⚠️ No position to create trailing stop for")
+                return None
+            
+            # Submit trailing stop order - triggers on first negative price movement
+            # Using global TRAIL_PERCENT for configurable trailing stop
+            trailing_stop_order = await asyncio.to_thread(
+                api.submit_order,
+                symbol=symbol,
+                qty=position_qty,
+                side="sell",
+                type="trailing_stop",
+                trail_percent=TRAIL_PERCENT,
+                time_in_force="day"
+            )
+            
+            logger.info(f"📤 Alpaca trailing stop order submitted: {trailing_stop_order.id}")
+            logger.info(f"   Quantity: {position_qty}, Trail: {TRAIL_PERCENT*100:.2f}%")
+            return trailing_stop_order
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to submit trailing stop order: {e}")
+            return None
+
+    async def monitor_trailing_stop_order():
+        """Monitor the trailing stop order status"""
+        if not alpaca_trailing_stop_order:
+            return
+            
+        try:
+            order_status = await asyncio.to_thread(api.get_order, alpaca_trailing_stop_order.id)
+            
+            if order_status.status == "filled":
+                filled_price = float(order_status.filled_avg_price or 0)
+                pnl = (filled_price - entry_price) / entry_price * 100
+                logger.info(f"✅ Alpaca trailing stop FILLED: {symbol} @ ${filled_price:.2f} (P&L: {pnl:+.2f}%)")
+                return True  # Position closed by Alpaca
+            elif order_status.status in ["canceled", "rejected", "expired"]:
+                logger.warning(f"⚠️ Alpaca trailing stop order {order_status.status}")
+                return False  # Order failed, continue with websocket monitoring
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not check trailing stop order status: {e}")
+            
+        return False  # Continue monitoring
 
     async def finnhub_ws():
         uri = f"wss://ws.finnhub.io?token={finnhub_key}"
@@ -946,7 +1084,7 @@ async def monitor_trade_ws(
                             continue
                         price = data["data"][-1]["p"]
                         async with price_lock:
-                            latest_price = price
+                            latest_price["value"] = price
                         logger.debug(f"Finnhub tick: {symbol} @ {price:.2f}")
             except Exception as e:
                 attempt += 1
@@ -990,7 +1128,7 @@ async def monitor_trade_ws(
                             if msg.get("T") == "t":
                                 price = msg["p"]
                                 async with price_lock:
-                                    latest_price = price
+                                    latest_price["value"] = price
                                 logger.debug(f"Alpaca tick: {symbol} @ {price:.2f}")
             except Exception as e:
                 attempt += 1
@@ -1009,9 +1147,16 @@ async def monitor_trade_ws(
         while True:
             await asyncio.sleep(0.1)
             async with price_lock:
-                price = latest_price
+                price = latest_price["value"]
             now = datetime.now(TZ)
             tick_count += 1
+
+            # Check if trailing stop order was filled (if it exists)
+            if alpaca_trailing_stop_order:
+                order_filled = await monitor_trailing_stop_order()
+                if order_filled:
+                    logger.info("✅ Position closed by Alpaca trailing stop - exiting monitor")
+                    break
 
             # periodic logging
             current_time = time.monotonic()
@@ -1031,7 +1176,15 @@ async def monitor_trade_ws(
                 hit_target = True
                 peak = price
                 pnl = (price - entry_price) / entry_price * 100
-                logger.info(f"🎯 TARGET HIT: {symbol} @ ${price:.2f} (P&L: {pnl:+.2f}%) - Now trailing...")
+                logger.info(f"🎯 TARGET HIT: {symbol} @ ${price:.2f} (P&L: {pnl:+.2f}%) - Submitting trailing stop...")
+                
+                # Submit trailing stop order to Alpaca
+                alpaca_trailing_stop_order = await submit_trailing_stop_order(price)
+                if alpaca_trailing_stop_order:
+                    logger.info("✅ Alpaca trailing stop order active - websocket monitoring as backup")
+                else:
+                    logger.warning("⚠️ Alpaca trailing stop failed - relying on websocket monitoring")
+                
             if hit_target:
                 if price > peak:
                     old_peak = peak
@@ -1039,9 +1192,23 @@ async def monitor_trade_ws(
                     logger.debug(f"New peak for {symbol}: ${old_peak:.2f} → ${peak:.2f}")
                 elif price < peak:
                     decline = (peak - price) / peak * 100
+                    logger.debug(f"📉 Price decline detected ({decline:.2f}%)")
+                    
+                    # Always trigger websocket sell on decline - it will handle both scenarios:
+                    # 1. If Alpaca trailing stop already filled, verify_and_handle_sell will find no position
+                    # 2. If Alpaca trailing stop failed/slow, verify_and_handle_sell will close the position
                     await verify_and_handle_sell("📉 TRAILING STOP", price)
                     break
+                        
     finally:
+        # Cancel any remaining trailing stop order
+        if alpaca_trailing_stop_order:
+            try:
+                await asyncio.to_thread(api.cancel_order, alpaca_trailing_stop_order.id)
+                logger.info("📤 Cancelled trailing stop order on exit")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not cancel trailing stop order on exit: {e}")
+        
         fh_task.cancel()
         alpaca_task.cancel()
         await asyncio.gather(fh_task, alpaca_task, return_exceptions=True)
