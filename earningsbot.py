@@ -35,9 +35,9 @@ MONITOR_END_MINUTE = 33 #end minute
 
 SURPRISE_THRESHOLD = 1 # % min earnings suprise
 MAX_SURPRISE       = 600 # man suprise
-MC_THRESHOLD       = 1_000_000 # market cap in millions of dollars
-MIN_PCT_INCREASE   = 3.0  # Minimum threshold for % increase at open
-TRAIL_PERCENT      = 0.001  # 0.1%- very tight trailing stop
+MC_THRESHOLD       = 100_000_000 # market cap in millions of dollars
+MIN_PCT_INCREASE   = 2.84  # Minimum threshold for % increase at open
+TRAIL_PERCENT      = 0.1  # 0.1%- very tight trailing stop
 
 ALPACA_WS_URL = "wss://stream.data.alpaca.markets/v2/iex"  # or v2/crypto or v2/stocks, adjust as needed
 ALPACA_MAX_SUBSCRIBE = 30
@@ -209,7 +209,7 @@ def filter_candidates(
             logger.debug(f"Fetching company profile for {sym}")
             profile = fh.company_profile2(symbol=sym)
             last_profile_time = time.monotonic()
-            mc = float(profile.get("marketCapitalization", 0)) / 1e6
+            mc = float(profile.get("marketCapitalization", 0))
             logger.debug(f"{sym} profile: MC={mc:.1f}M, country={profile.get('country')}")
         except Exception as exc:
             logger.warning(f"Profile fetch failed for {sym}: {exc}")
@@ -244,7 +244,7 @@ async def get_opening_prices_with_window(
     finnhub_key: str,
     api: AlpacaREST,
     prev_close: Dict[str, float],
-    window_seconds: int = 10,
+    window_seconds: int = 15,
     max_rest_symbols: int = 50
 ) -> Optional[Dict[str, float]]:
     """
