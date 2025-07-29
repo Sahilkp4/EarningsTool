@@ -5,9 +5,10 @@ import logging
 import asyncio
 import json
 import requests
+import re
 from dotenv import load_dotenv
 from datetime import datetime, date, timedelta
-#fix these comments when running on ubuntu aaabbccdd
+#fix these comments when running on ubuntu fixed report
 try:
     from zoneinfo import ZoneInfo  # Python 3.9+
 except ImportError:
@@ -79,12 +80,6 @@ def get_prev_business_day(ref: date) -> date:
             logger.debug(f"Previous business day for {ref} is {d}")
             return d
 
-def is_within_earnings_window(entry: dict, start: str, end: str) -> bool:
-    ok = ((entry.get("date") == start and entry.get("hour") == "amc") or
-          (entry.get("date") == end   and entry.get("hour") == "bmo"))
-    logger.debug(f"{entry.get('symbol')} window check: {ok} (date={entry.get('date')}, hour={entry.get('hour')})")
-    return ok
-
 def get_cutoff_time(today: date) -> datetime:
     cutoff = datetime(
         today.year, today.month, today.day,
@@ -93,65 +88,117 @@ def get_cutoff_time(today: date) -> datetime:
     logger.debug(f"Monitor cutoff time set to {cutoff.time()}")
     return cutoff
 
-# ─── Core Logic ───────────────────────────────────────────────────────────────
-def fetch_earnings_calendar(fh: finnhub.Client, frm: str, to: str) -> List[dict]:
-    logger.debug(f"Fetching earnings calendar from {frm} to {to}")
-    try:
-        cal = fh.earnings_calendar(symbol=None, _from=frm, to=to)
-        entries = cal.get("earningsCalendar", [])
-        logger.info(f"Fetched {len(entries)} earnings entries from {frm} to {to}")
-        if not entries:
-            logger.warning("No earnings entries found in calendar")
-        return entries
-    except Exception as e:
-        logger.error(f"Failed to fetch earnings calendar: {e}")
+# ─── Daily Tickers Input Parsing ─────────────────────────────────────────────
+def load_tickers_from_dailytickers(target_date: date) -> List[Dict[str, float]]:
+    """
+    Load tickers from dailytickers.txt for the specified date.
+    Only processes log entries from the target date.
+    
+    Args:
+        target_date: The date to look for ticker entries
+        
+    Returns:
+        List of dictionaries with 'symbol' and 'surprise' keys
+    """
+    dailytickers_file = os.path.join(os.path.dirname(__file__), "dailytickers.txt")
+    
+    if not os.path.exists(dailytickers_file):
+        logger.error(f"dailytickers.txt not found at {dailytickers_file}")
         return []
-
-def filter_candidates(
-    entries: List[dict],
-    fh: finnhub.Client,
-    frm: str,
-    to: str
-) -> List[dict]:
-    logger.info(f"Starting candidate filtering for {len(entries)} entries")
-    candidates: List[dict] = []
-    filtered_count = {
-        'missing_data': 0,
-        'poor_surprise': 0,
-        'wrong_window': 0,
-        'passed': 0
-    }
-
-    for e in entries:
-        sym = e.get("symbol")
-        est, act = e.get("epsEstimate"), e.get("epsActual")
-        logger.debug(f"Evaluating {sym}: est={est}, act={act}, date={e.get('date')}, hour={e.get('hour')}")
-
-        if est is None or act is None or est == 0 or act < 0:
-            logger.debug(f"Skipping {sym}: missing/zero estimate or negative actual")
-            filtered_count['missing_data'] += 1
-            continue
-
-        surprise = (act - est) / abs(est) * 100
-        logger.debug(f"{sym} surprise={surprise:.2f}%")
-        if surprise <= SURPRISE_THRESHOLD or surprise > MAX_SURPRISE:
-            logger.debug(f"Skipping {sym}: surprise {surprise:.2f}% outside [{SURPRISE_THRESHOLD}, {MAX_SURPRISE}]")
-            filtered_count['poor_surprise'] += 1
-            continue
-
-        if not is_within_earnings_window(e, frm, to):
-            logger.debug(f"Skipping {sym}: not in earnings window")
-            filtered_count['wrong_window'] += 1
-            continue
-
-        # Note: Market cap filtering removed since company_profile2 is not available on free tier
-        candidates.append({"symbol": sym, "surprise": surprise})
-        logger.info(f"✓ Candidate {sym}: surprise={surprise:.2f}%")
-        filtered_count['passed'] += 1
-
-    logger.info(f"Filtering results: {filtered_count}")
-    logger.info(f"Total candidates after filter: {len(candidates)}")
-    return candidates
+    
+    logger.info(f"Loading tickers from dailytickers.txt for date {target_date}")
+    
+    try:
+        with open(dailytickers_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Split into lines (handles both \n and \r\n)
+        lines = content.splitlines()
+        
+        # Look for lines from the target date
+        target_date_str = target_date.strftime("%Y-%m-%d")
+        logger.debug(f"Looking for entries with date: {target_date_str}")
+        
+        candidates = []
+        matching_lines_found = 0
+        
+        for line_num, line in enumerate(lines, 1):
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Check if line starts with target date
+            if not line.startswith(target_date_str):
+                continue
+                
+            # Look for the "Sorted candidates by surprise:" pattern
+            if "Sorted candidates by surprise:" not in line:
+                logger.debug(f"Line {line_num} has target date but no 'Sorted candidates by surprise:' pattern")
+                continue
+                
+            matching_lines_found += 1
+            logger.debug(f"Found matching line {line_num} (length: {len(line)} chars)")
+            
+            # Extract the ticker portion after "Sorted candidates by surprise:"
+            pattern = r"Sorted candidates by surprise:\s*(.+)"
+            match = re.search(pattern, line)
+            
+            if not match:
+                logger.warning(f"Could not extract ticker data from line {line_num}: {line[:100]}...")
+                continue
+            
+            ticker_string = match.group(1).strip()
+            logger.debug(f"Extracted ticker string (length: {len(ticker_string)} chars): {ticker_string[:100]}...")
+            
+            # Parse individual tickers and surprises
+            # Pattern: TICKER(XX.X%) - handles tickers with letters only
+            ticker_pattern = r"([A-Z]+)\((\d+(?:\.\d+)?)%\)"
+            matches = re.findall(ticker_pattern, ticker_string)
+            
+            if not matches:
+                logger.warning(f"No ticker patterns found in line {line_num}")
+                continue
+            
+            # Process each ticker found in this line
+            line_candidates = []
+            for symbol, surprise_str in matches:
+                try:
+                    surprise = float(surprise_str)
+                    line_candidates.append({"symbol": symbol, "surprise": surprise})
+                    logger.debug(f"Parsed {symbol}: surprise={surprise}%")
+                except ValueError as e:
+                    logger.warning(f"Could not parse surprise for {symbol}: {surprise_str} - {e}")
+                    continue
+            
+            # Add to main candidates list
+            candidates.extend(line_candidates)
+            logger.info(f"Added {len(line_candidates)} candidates from line {line_num}")
+        
+        if matching_lines_found == 0:
+            logger.warning(f"No lines found with date {target_date_str} and 'Sorted candidates by surprise:' pattern")
+            return []
+        
+        if not candidates:
+            logger.warning(f"No ticker entries could be parsed for date {target_date_str}")
+            return []
+        
+        # Remove duplicates while preserving order (in case same ticker appears multiple times)
+        seen = set()
+        unique_candidates = []
+        for candidate in candidates:
+            symbol = candidate['symbol']
+            if symbol not in seen:
+                seen.add(symbol)
+                unique_candidates.append(candidate)
+            else:
+                logger.debug(f"Duplicate ticker {symbol} removed")
+        
+        logger.info(f"Successfully loaded {len(unique_candidates)} unique tickers for {target_date_str} from {matching_lines_found} log entries")
+        return unique_candidates
+        
+    except Exception as e:
+        logger.error(f"Error reading dailytickers.txt: {e}")
+        return []
 
 def preload_prev_closes(
     api: AlpacaREST,
@@ -184,10 +231,94 @@ def preload_prev_closes(
     logger.info(f"Successfully loaded {len(out)} previous closes")
     return out
 
-# ─── Finnhub Quote Integration ───────────────────────────────────────────────
+# ─── Market Data Integration (Alpaca + Finnhub Fallback) ──────────────────────
+def get_alpaca_quote_data(api: AlpacaREST, symbol: str, today: str) -> Dict:
+    """
+    Fetch current day OHLC data from Alpaca for a given symbol.
+    Only includes regular market hours (9:30 AM - 4:00 PM ET).
+    
+    Args:
+        api: Alpaca REST client
+        symbol: Stock symbol
+        today: Today's date in YYYY-MM-DD format
+    
+    Returns:
+        Dict with OHLC data or empty dict if no data found
+    """
+    try:
+        logger.debug(f"Fetching Alpaca intraday data for {symbol} (regular market hours only)")
+        
+        # Regular market hours: 9:30 AM - 4:00 PM ET
+        start_iso = f"{today}T09:30:00-04:00"  # Market open
+        end_iso = f"{today}T16:00:00-04:00"    # Market close
+        
+        bars = api.get_bars(
+            symbol,
+            timeframe="1Min",
+            start=start_iso,
+            end=end_iso,
+            limit=500,  # ~390 minutes in trading day, plus buffer
+            adjustment="raw"
+        )
+        
+        if not bars:
+            logger.warning(f"No Alpaca bars found for {symbol} on {today} during market hours")
+            return {}
+        
+        # Filter bars to ensure they're within market hours (double-check)
+        market_bars = []
+        for bar in bars:
+            bar_time = bar.t.astimezone(TZ)
+            bar_hour = bar_time.hour
+            bar_minute = bar_time.minute
+            
+            # Include bars from 9:30 AM to 3:59 PM ET
+            if (bar_hour == 9 and bar_minute >= 30) or (10 <= bar_hour <= 15):
+                market_bars.append(bar)
+            elif bar_hour == 16 and bar_minute == 0:  # Include 4:00 PM close
+                market_bars.append(bar)
+        
+        if not market_bars:
+            logger.warning(f"No bars found during market hours for {symbol}")
+            return {}
+        
+        # Calculate OHLC from market hours bars only
+        opens = [bar.o for bar in market_bars]
+        highs = [bar.h for bar in market_bars]
+        lows = [bar.l for bar in market_bars]
+        closes = [bar.c for bar in market_bars]
+        
+        # Get the opening price (first bar of the day)
+        open_price = opens[0] if opens else 0
+        
+        # Get the highest high and lowest low during market hours
+        high_price = max(highs) if highs else 0
+        low_price = min(lows) if lows else 0
+        
+        # Get the closing price (last bar of the day)
+        close_price = closes[-1] if closes else 0
+        
+        result = {
+            'open_price': open_price,
+            'high_price': high_price,
+            'low_price': low_price,
+            'close_price': close_price,
+            'bar_count': len(market_bars),
+            'total_bars': len(bars),
+            'time_range': f"{market_bars[0].t.astimezone(TZ).strftime('%H:%M')} - {market_bars[-1].t.astimezone(TZ).strftime('%H:%M')}"
+        }
+        
+        logger.debug(f"Alpaca market hours OHLC for {symbol}: O=${result['open_price']:.2f}, H=${result['high_price']:.2f}, L=${result['low_price']:.2f}, C=${result['close_price']:.2f}")
+        logger.debug(f"  {result['bar_count']} market bars ({result['time_range']}) from {result['total_bars']} total bars")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error fetching Alpaca data for {symbol}: {e}")
+        return {}
+
 def get_finnhub_quote_data(fh: finnhub.Client, symbol: str) -> Dict:
     """
-    Fetch quote data from Finnhub for a given symbol.
+    Fetch quote data from Finnhub for a given symbol as fallback.
     Uses the quote endpoint which should be available on free tier.
     
     Args:
@@ -209,6 +340,7 @@ def get_finnhub_quote_data(fh: finnhub.Client, symbol: str) -> Dict:
                 'high_price': quote.get('h', 0),     # High price of the day
                 'low_price': quote.get('l', 0),      # Low price of the day
                 'prev_close': quote.get('pc', 0),    # Previous close price
+                'close_price': quote.get('c', 0),    # Current close price
                 'timestamp': quote.get('t', 0)       # Timestamp
             }
             
@@ -228,23 +360,25 @@ def calculate_percentage_change(old_value: float, new_value: float) -> float:
         return 0.0
     return ((new_value - old_value) / old_value) * 100
 
-def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, float], fh: finnhub.Client) -> str:
+def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, float], api: AlpacaREST, fh: finnhub.Client, today: str) -> str:
     """
-    Generate comprehensive earnings report with quote data from Finnhub.
+    Generate comprehensive earnings report with OHLC data from Alpaca (primary) and Finnhub (fallback).
     Results are ordered by %change high (descending).
     """
-    logger.info(f"Generating earnings report for {len(candidates)} candidates using Finnhub quote data")
+    logger.info(f"Generating earnings report for {len(candidates)} candidates using Alpaca + Finnhub data")
     
     report_lines = []
     report_lines.append("=" * 100)
-    report_lines.append(f"EARNINGS REPORT (Finnhub Quote) - {datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    report_lines.append(f"EARNINGS REPORT (Alpaca + Finnhub) - {datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}")
     report_lines.append("=" * 100)
     report_lines.append("")
     
     # Collect all data first for sorting
     report_data = []
     failed_reports = 0
-    last_call_time = 0.0
+    alpaca_success = 0
+    finnhub_fallback = 0
+    last_finnhub_call = 0.0
     
     for candidate in candidates:
         symbol = candidate['symbol']
@@ -253,26 +387,40 @@ def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, floa
         # Get previous close from our existing data (Alpaca)
         alpaca_prev_close = prev_closes.get(symbol, 0.0)
         
-        # Rate limiting for Finnhub free tier (60 calls/min)
-        now = time.monotonic()
-        if now - last_call_time < FINNHUB_CALL_INTERVAL:
-            pause = FINNHUB_CALL_INTERVAL - (now - last_call_time)
-            logger.debug(f"Rate limiting: sleeping {pause:.2f}s before Finnhub call for {symbol}")
-            time.sleep(pause)
+        # Try Alpaca first for OHLC data
+        quote_data = get_alpaca_quote_data(api, symbol, today)
+        data_source = "Alpaca"
         
-        # Get Finnhub quote data
-        quote_data = get_finnhub_quote_data(fh, symbol)
-        last_call_time = time.monotonic()
+        if quote_data:
+            alpaca_success += 1
+            logger.debug(f"Using Alpaca data for {symbol}")
+        else:
+            # Fallback to Finnhub
+            logger.debug(f"Alpaca failed for {symbol}, trying Finnhub fallback")
+            
+            # Rate limiting for Finnhub free tier (60 calls/min)
+            now = time.monotonic()
+            if now - last_finnhub_call < FINNHUB_CALL_INTERVAL:
+                pause = FINNHUB_CALL_INTERVAL - (now - last_finnhub_call)
+                logger.debug(f"Rate limiting: sleeping {pause:.2f}s before Finnhub call for {symbol}")
+                time.sleep(pause)
+            
+            quote_data = get_finnhub_quote_data(fh, symbol)
+            last_finnhub_call = time.monotonic()
+            data_source = "Finnhub"
+            
+            if quote_data:
+                finnhub_fallback += 1
         
         if not quote_data:
-            logger.warning(f"No Finnhub quote data available for {symbol}")
+            logger.warning(f"No data available for {symbol} from either source")
             failed_reports += 1
             # Add entry with N/A values and -999 as sort key (will appear at bottom)
             report_data.append({
                 'symbol': symbol,
                 'surprise': surprise,
                 'alpaca_prev_close': alpaca_prev_close,
-                'finnhub_prev_close': 'N/A',
+                'data_source': 'N/A',
                 'open_price': 'N/A',
                 'pct_change_open': 'N/A',
                 'high_price': 'N/A',
@@ -287,10 +435,12 @@ def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, floa
         open_price = quote_data['open_price']
         high_price = quote_data['high_price']
         low_price = quote_data['low_price']
-        finnhub_prev_close = quote_data['prev_close']
         
-        # Use Finnhub's previous close if available, otherwise use Alpaca's
-        reference_prev_close = finnhub_prev_close if finnhub_prev_close > 0 else alpaca_prev_close
+        # For previous close, prefer Finnhub if available and from Finnhub source, otherwise use Alpaca
+        if data_source == "Finnhub" and quote_data.get('prev_close', 0) > 0:
+            reference_prev_close = quote_data['prev_close']
+        else:
+            reference_prev_close = alpaca_prev_close
         
         # Calculate percentage changes
         pct_change_open = calculate_percentage_change(reference_prev_close, open_price) if reference_prev_close > 0 else 0.0
@@ -302,7 +452,8 @@ def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, floa
             'symbol': symbol,
             'surprise': surprise,
             'alpaca_prev_close': alpaca_prev_close,
-            'finnhub_prev_close': finnhub_prev_close,
+            'data_source': data_source,
+            'reference_prev_close': reference_prev_close,
             'open_price': open_price,
             'pct_change_open': pct_change_open,
             'high_price': high_price,
@@ -316,7 +467,7 @@ def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, floa
     report_data.sort(key=lambda x: x['sort_key'], reverse=True)
     
     # Generate report header
-    header = f"{'Symbol':<8} {'Surprise':<8} {'PrevClose':<10} {'Open':<10} {'%ChgOpen':<10} {'High':<10} {'Low':<10} {'%ChgHigh':<10} {'%ChgLow':<10}"
+    header = f"{'Symbol':<8} {'Surprise':<8} {'Source':<8} {'PrevClose':<10} {'Open':<10} {'%ChgOpen':<10} {'High':<10} {'Low':<10} {'%ChgHigh':<10} {'%ChgLow':<10}"
     report_lines.append(header)
     report_lines.append("-" * len(header))
     
@@ -325,11 +476,9 @@ def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, floa
     for data in report_data:
         if data['sort_key'] != -999:
             successful_reports += 1
-            # Use Finnhub prev close if available, otherwise use Alpaca
-            display_prev_close = data['finnhub_prev_close'] if data['finnhub_prev_close'] > 0 else data['alpaca_prev_close']
-            line = f"{data['symbol']:<8} {data['surprise']:<8.2f} {display_prev_close:<10.2f} {data['open_price']:<10.2f} {data['pct_change_open']:<10.2f} {data['high_price']:<10.2f} {data['low_price']:<10.2f} {data['pct_change_high']:<10.2f} {data['pct_change_low']:<10.2f}"
+            line = f"{data['symbol']:<8} {data['surprise']:<8.2f} {data['data_source']:<8} {data['reference_prev_close']:<10.2f} {data['open_price']:<10.2f} {data['pct_change_open']:<10.2f} {data['high_price']:<10.2f} {data['low_price']:<10.2f} {data['pct_change_high']:<10.2f} {data['pct_change_low']:<10.2f}"
         else:
-            line = f"{data['symbol']:<8} {data['surprise']:<8.2f} {data['alpaca_prev_close']:<10.2f} {'N/A':<10} {'N/A':<10} {'N/A':<10} {'N/A':<10} {'N/A':<10} {'N/A':<10}"
+            line = f"{data['symbol']:<8} {data['surprise']:<8.2f} {data['data_source']:<8} {data['alpaca_prev_close']:<10.2f} {'N/A':<10} {'N/A':<10} {'N/A':<10} {'N/A':<10} {'N/A':<10} {'N/A':<10}"
         
         report_lines.append(line)
     
@@ -340,16 +489,18 @@ def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, floa
     report_lines.append(f"  Total candidates: {len(candidates)}")
     report_lines.append(f"  Successful reports: {successful_reports}")
     report_lines.append(f"  Failed reports: {failed_reports}")
-    report_lines.append(f"  Data source: Finnhub Quote API (Free Tier)")
-    report_lines.append(f"  Rate limit: {FINNHUB_RATE_LIMIT} calls/min")
+    report_lines.append(f"  Alpaca primary source: {alpaca_success}")
+    report_lines.append(f"  Finnhub fallback used: {finnhub_fallback}")
+    report_lines.append(f"  Finnhub rate limit: {FINNHUB_RATE_LIMIT} calls/min")
     report_lines.append("")
     report_lines.append("Results ordered by %Change High (highest to lowest)")
-    report_lines.append("NOTE: Using real-time quote data instead of historical OHLC")
-    report_lines.append("NOTE: Market cap filtering disabled (company_profile2 not available on free tier)")
+    report_lines.append("NOTE: Using Alpaca intraday data (primary) with Finnhub fallback")
+    report_lines.append("NOTE: Alpaca provides more accurate intraday highs/lows from 1-min bars")
+    report_lines.append("NOTE: Tickers loaded from dailytickers.txt for current date only")
     report_lines.append("=" * 100)
     
     report = "\n".join(report_lines)
-    logger.info(f"Generated earnings report with {successful_reports} successful entries using Finnhub quote data")
+    logger.info(f"Generated earnings report with {successful_reports} successful entries")
     return report
 
 def save_earnings_report(report: str, filename: str = "earningsreport.txt"):
@@ -363,7 +514,7 @@ def save_earnings_report(report: str, filename: str = "earningsreport.txt"):
 
 def main():
     """Main function to run the earnings report generation."""
-    logger.info("Starting earnings report generation with Finnhub OHLC data")
+    logger.info("Starting earnings report generation with dailytickers.txt input")
     
     # Initialize clients
     fh = finnhub.Client(api_key=FINNHUB_API_KEY)
@@ -373,40 +524,41 @@ def main():
         base_url=ALPACA_BASE_URL
     )
     
-    # Set up date range
+    # Get today's date and load tickers from dailytickers.txt
     today = date.today()
-    yesterday = get_prev_business_day(today)
+    logger.info(f"Looking for tickers from dailytickers.txt for date: {today}")
     
-    frm = yesterday.strftime("%Y-%m-%d")
-    to = today.strftime("%Y-%m-%d")
-    
-    logger.info(f"Analyzing earnings from {frm} to {to}")
-    
-    # Fetch earnings calendar
-    entries = fetch_earnings_calendar(fh, frm, to)
-    if not entries:
-        logger.warning("No earnings entries found, exiting")
-        return
-    
-    # Filter candidates (note: market cap filtering removed)
-    candidates = filter_candidates(entries, fh, frm, to)
+    candidates = load_tickers_from_dailytickers(today)
     if not candidates:
-        logger.warning("No candidates found after filtering, exiting")
+        logger.warning(f"No candidates loaded for {today}, exiting")
+        print(f"No valid tickers found for {today} in dailytickers.txt. Exiting.")
         return
+    
+    logger.info(f"Loaded {len(candidates)} tickers for {today}:")
+    for candidate in candidates:
+        logger.debug(f"  {candidate['symbol']}: {candidate['surprise']:.1f}%")
+    
+    # Set up date range for previous closes
+    yesterday = get_prev_business_day(today)
+    frm = yesterday.strftime("%Y-%m-%d")
+    
+    logger.info(f"Using {frm} for previous close data")
     
     # Get previous closes
+    logger.info(f"Fetching previous close data for {frm}...")
     prev_closes = preload_prev_closes(api, candidates, frm)
     
-    # Generate report with Finnhub quote data
-    report = generate_earnings_report(candidates, prev_closes, fh)
+    # Generate report with Alpaca + Finnhub data
+    logger.info("Generating earnings report...")
+    report = generate_earnings_report(candidates, prev_closes, api, fh, today.strftime("%Y-%m-%d"))
     
     # Save report
     save_earnings_report(report)
     
-    # Also print to console
-    print(report)
+    # Also print to console (for cron logging)
+    print("\n" + report)
     
-    logger.info("Earnings report generation completed using Finnhub OHLC data")
+    logger.info(f"Earnings report generation completed for {today} with {len(candidates)} tickers from dailytickers.txt")
 
 if __name__ == "__main__":
     main()
