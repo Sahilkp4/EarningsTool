@@ -13,7 +13,7 @@ Usage:
 Outputs:
     earnings_bins.json   -- main output file used by EarningsBot.py
 
-Author: AI Assistant (for user)
+
 Date: 2025-08-08
 """
 from __future__ import annotations
