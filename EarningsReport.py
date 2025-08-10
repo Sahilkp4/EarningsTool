@@ -236,6 +236,7 @@ def get_alpaca_quote_data(api: AlpacaREST, symbol: str, today: str) -> Dict:
     """
     Fetch current day OHLC data from Alpaca for a given symbol.
     Only includes regular market hours (9:30 AM - 4:00 PM ET).
+    Now includes timestamps for high and low prices, and closing price.
     
     Args:
         api: Alpaca REST client
@@ -243,7 +244,7 @@ def get_alpaca_quote_data(api: AlpacaREST, symbol: str, today: str) -> Dict:
         today: Today's date in YYYY-MM-DD format
     
     Returns:
-        Dict with OHLC data or empty dict if no data found
+        Dict with OHLC data, high/low times, and closing price or empty dict if no data found
     """
     try:
         logger.debug(f"Fetching Alpaca intraday data for {symbol} (regular market hours only)")
@@ -282,33 +283,41 @@ def get_alpaca_quote_data(api: AlpacaREST, symbol: str, today: str) -> Dict:
             logger.warning(f"No bars found during market hours for {symbol}")
             return {}
         
-        # Calculate OHLC from market hours bars only
-        opens = [bar.o for bar in market_bars]
-        highs = [bar.h for bar in market_bars]
-        lows = [bar.l for bar in market_bars]
-        closes = [bar.c for bar in market_bars]
+        # Initialize tracking variables
+        open_price = market_bars[0].o
+        high_price = market_bars[0].h
+        low_price = market_bars[0].l
+        close_price = market_bars[-1].c  # Last available close price
+        high_time = market_bars[0].t.astimezone(TZ)
+        low_time = market_bars[0].t.astimezone(TZ)
         
-        # Get the opening price (first bar of the day)
-        open_price = opens[0] if opens else 0
-        
-        # Get the highest high and lowest low during market hours
-        high_price = max(highs) if highs else 0
-        low_price = min(lows) if lows else 0
-        
-        # Get the closing price (last bar of the day)
-        close_price = closes[-1] if closes else 0
+        # Find the actual high and low prices with their timestamps
+        for bar in market_bars:
+            bar_time = bar.t.astimezone(TZ)
+            
+            # Check for new high
+            if bar.h > high_price:
+                high_price = bar.h
+                high_time = bar_time
+            
+            # Check for new low
+            if bar.l < low_price:
+                low_price = bar.l
+                low_time = bar_time
         
         result = {
             'open_price': open_price,
             'high_price': high_price,
             'low_price': low_price,
             'close_price': close_price,
+            'high_time': high_time.strftime('%H:%M'),
+            'low_time': low_time.strftime('%H:%M'),
             'bar_count': len(market_bars),
             'total_bars': len(bars),
             'time_range': f"{market_bars[0].t.astimezone(TZ).strftime('%H:%M')} - {market_bars[-1].t.astimezone(TZ).strftime('%H:%M')}"
         }
         
-        logger.debug(f"Alpaca market hours OHLC for {symbol}: O=${result['open_price']:.2f}, H=${result['high_price']:.2f}, L=${result['low_price']:.2f}, C=${result['close_price']:.2f}")
+        logger.debug(f"Alpaca market hours OHLC for {symbol}: O=${result['open_price']:.2f}, H=${result['high_price']:.2f}@{result['high_time']}, L=${result['low_price']:.2f}@{result['low_time']}, C=${result['close_price']:.2f}")
         logger.debug(f"  {result['bar_count']} market bars ({result['time_range']}) from {result['total_bars']} total bars")
         return result
         
@@ -320,6 +329,7 @@ def get_finnhub_quote_data(fh: finnhub.Client, symbol: str) -> Dict:
     """
     Fetch quote data from Finnhub for a given symbol as fallback.
     Uses the quote endpoint which should be available on free tier.
+    Note: Finnhub doesn't provide intraday timestamps for high/low prices.
     
     Args:
         fh: Finnhub client
@@ -341,7 +351,9 @@ def get_finnhub_quote_data(fh: finnhub.Client, symbol: str) -> Dict:
                 'low_price': quote.get('l', 0),      # Low price of the day
                 'prev_close': quote.get('pc', 0),    # Previous close price
                 'close_price': quote.get('c', 0),    # Current close price
-                'timestamp': quote.get('t', 0)       # Timestamp
+                'timestamp': quote.get('t', 0),      # Timestamp
+                'high_time': 'N/A',                  # Finnhub doesn't provide intraday timestamps
+                'low_time': 'N/A'                    # Finnhub doesn't provide intraday timestamps
             }
             
             logger.debug(f"Finnhub quote data for {symbol}: {result}")
@@ -363,14 +375,15 @@ def calculate_percentage_change(old_value: float, new_value: float) -> float:
 def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, float], api: AlpacaREST, fh: finnhub.Client, today: str) -> str:
     """
     Generate comprehensive earnings report with OHLC data from Alpaca (primary) and Finnhub (fallback).
+    Now includes high/low times and closing prices.
     Results are ordered by %change high (descending).
     """
     logger.info(f"Generating earnings report for {len(candidates)} candidates using Alpaca + Finnhub data")
     
     report_lines = []
-    report_lines.append("=" * 100)
+    report_lines.append("=" * 130)
     report_lines.append(f"EARNINGS REPORT (Alpaca + Finnhub) - {datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    report_lines.append("=" * 100)
+    report_lines.append("=" * 130)
     report_lines.append("")
     
     # Collect all data first for sorting
@@ -424,9 +437,13 @@ def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, floa
                 'open_price': 'N/A',
                 'pct_change_open': 'N/A',
                 'high_price': 'N/A',
+                'high_time': 'N/A',
                 'low_price': 'N/A',
+                'low_time': 'N/A',
+                'close_price': 'N/A',
                 'pct_change_high': 'N/A',
                 'pct_change_low': 'N/A',
+                'pct_change_close': 'N/A',
                 'sort_key': -999  # Will sort to bottom
             })
             continue
@@ -435,6 +452,9 @@ def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, floa
         open_price = quote_data['open_price']
         high_price = quote_data['high_price']
         low_price = quote_data['low_price']
+        close_price = quote_data['close_price']
+        high_time = quote_data.get('high_time', 'N/A')
+        low_time = quote_data.get('low_time', 'N/A')
         
         # For previous close, prefer Finnhub if available and from Finnhub source, otherwise use Alpaca
         if data_source == "Finnhub" and quote_data.get('prev_close', 0) > 0:
@@ -446,6 +466,7 @@ def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, floa
         pct_change_open = calculate_percentage_change(reference_prev_close, open_price) if reference_prev_close > 0 else 0.0
         pct_change_high = calculate_percentage_change(open_price, high_price) if open_price > 0 else 0.0
         pct_change_low = calculate_percentage_change(open_price, low_price) if open_price > 0 else 0.0
+        pct_change_close = calculate_percentage_change(reference_prev_close, close_price) if reference_prev_close > 0 else 0.0
         
         # Add to report data with sort key
         report_data.append({
@@ -457,17 +478,21 @@ def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, floa
             'open_price': open_price,
             'pct_change_open': pct_change_open,
             'high_price': high_price,
+            'high_time': high_time,
             'low_price': low_price,
+            'low_time': low_time,
+            'close_price': close_price,
             'pct_change_high': pct_change_high,
             'pct_change_low': pct_change_low,
+            'pct_change_close': pct_change_close,
             'sort_key': pct_change_high if isinstance(pct_change_high, (int, float)) else -999
         })
     
     # Sort by %change high (descending) - highest gains first
     report_data.sort(key=lambda x: x['sort_key'], reverse=True)
     
-    # Generate report header
-    header = f"{'Symbol':<8} {'Surprise':<8} {'Source':<8} {'PrevClose':<10} {'Open':<10} {'%ChgOpen':<10} {'High':<10} {'Low':<10} {'%ChgHigh':<10} {'%ChgLow':<10}"
+    # Generate report header - extended to include new columns
+    header = f"{'Symbol':<8} {'Surprise':<8} {'Src':<7} {'PrevCls':<8} {'Open':<8} {'%Open':<7} {'High':<8} {'HTime':<6} {'Low':<8} {'LTime':<6} {'Close':<8} {'%High':<7} {'%Low':<7} {'%Close':<7}"
     report_lines.append(header)
     report_lines.append("-" * len(header))
     
@@ -476,28 +501,23 @@ def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, floa
     for data in report_data:
         if data['sort_key'] != -999:
             successful_reports += 1
-            line = f"{data['symbol']:<8} {data['surprise']:<8.2f} {data['data_source']:<8} {data['reference_prev_close']:<10.2f} {data['open_price']:<10.2f} {data['pct_change_open']:<10.2f} {data['high_price']:<10.2f} {data['low_price']:<10.2f} {data['pct_change_high']:<10.2f} {data['pct_change_low']:<10.2f}"
+            line = f"{data['symbol']:<8} {data['surprise']:<8.2f} {data['data_source']:<7} {data['reference_prev_close']:<8.2f} {data['open_price']:<8.2f} {data['pct_change_open']:<7.2f} {data['high_price']:<8.2f} {data['high_time']:<6} {data['low_price']:<8.2f} {data['low_time']:<6} {data['close_price']:<8.2f} {data['pct_change_high']:<7.2f} {data['pct_change_low']:<7.2f} {data['pct_change_close']:<7.2f}"
         else:
-            line = f"{data['symbol']:<8} {data['surprise']:<8.2f} {data['data_source']:<8} {data['alpaca_prev_close']:<10.2f} {'N/A':<10} {'N/A':<10} {'N/A':<10} {'N/A':<10} {'N/A':<10} {'N/A':<10}"
+            line = f"{data['symbol']:<8} {data['surprise']:<8.2f} {data['data_source']:<7} {data['alpaca_prev_close']:<8.2f} {'N/A':<8} {'N/A':<7} {'N/A':<8} {'N/A':<6} {'N/A':<8} {'N/A':<6} {'N/A':<8} {'N/A':<7} {'N/A':<7} {'N/A':<7}"
         
         report_lines.append(line)
     
     # Summary
     report_lines.append("")
-    report_lines.append("-" * 100)
+    report_lines.append("-" * 130)
     report_lines.append(f"Report Summary:")
     report_lines.append(f"  Total candidates: {len(candidates)}")
     report_lines.append(f"  Successful reports: {successful_reports}")
     report_lines.append(f"  Failed reports: {failed_reports}")
     report_lines.append(f"  Alpaca primary source: {alpaca_success}")
     report_lines.append(f"  Finnhub fallback used: {finnhub_fallback}")
-    report_lines.append(f"  Finnhub rate limit: {FINNHUB_RATE_LIMIT} calls/min")
     report_lines.append("")
-    report_lines.append("Results ordered by %Change High (highest to lowest)")
-    report_lines.append("NOTE: Using Alpaca intraday data (primary) with Finnhub fallback")
-    report_lines.append("NOTE: Alpaca provides more accurate intraday highs/lows from 1-min bars")
-    report_lines.append("NOTE: Tickers loaded from dailytickers.txt for current date only")
-    report_lines.append("=" * 100)
+    report_lines.append("=" * 130)
     
     report = "\n".join(report_lines)
     logger.info(f"Generated earnings report with {successful_reports} successful entries")
