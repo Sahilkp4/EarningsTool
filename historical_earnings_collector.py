@@ -12,13 +12,14 @@ try:
 except ImportError:
     from backports.zoneinfo import ZoneInfo  # Python 3.8 fallback
 from typing import List, Dict, Optional, Set
+import csv
 
 import websockets
 import finnhub
 from alpaca_trade_api.rest import REST as AlpacaREST
 from typing import List, Dict, Set, Optional
 
-# ─── Constants & Configuration ────────────────────────────────────────────────────────────────────
+# ── Constants & Configuration ─────────────────────────────────────────────────────────────────────────
 TZ = ZoneInfo("America/New_York")
 load_dotenv('/home/ubuntu/.env')  # Load environment variables from .env file
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
@@ -49,9 +50,13 @@ PREMARKET_START_HOUR = 4
 PREMARKET_END_HOUR = 9
 PREMARKET_END_MINUTE = 30
 
-# ─── Logging Setup ─────────────────────────────────────────────────────────────────────────────────
+# Historical data collection settings
+HISTORICAL_DAYS = 30  # Number of days to go back
+TODAY = date(2025, 8, 20)  # August 20, 2025
+
+# ── Logging Setup ─────────────────────────────────────────────────────────────────────────────────────
 def configure_logging() -> logging.Logger:
-    logger = logging.getLogger("earnings_trader")
+    logger = logging.getLogger("historical_earnings_trader")
     logger.setLevel(logging.DEBUG)
     if not logger.handlers:
         fmt = logging.Formatter(
@@ -59,11 +64,11 @@ def configure_logging() -> logging.Logger:
             "%Y-%m-%d %H:%M:%S %Z"
         )
         ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
+        ch.setLevel(logging.INFO)  # Less verbose console output for historical runs
         ch.setFormatter(fmt)
         logger.addHandler(ch)
         fh = logging.FileHandler(
-            os.path.join(os.path.dirname(__file__), "session_output.txt"),
+            os.path.join(os.path.dirname(__file__), "historical_session_output.txt"),
             mode="a", encoding="utf-8"
         )
         fh.setLevel(logging.DEBUG)
@@ -73,7 +78,7 @@ def configure_logging() -> logging.Logger:
 
 logger = configure_logging()
 
-# ─── Utils ─────────────────────────────────────────────────────────────────────────────────────────
+# ── Utils ─────────────────────────────────────────────────────────────────────────────────────────────
 def get_prev_business_day(ref: date) -> date:
     d = ref
     while True:
@@ -81,6 +86,10 @@ def get_prev_business_day(ref: date) -> date:
         if d.weekday() < 5:
             logger.debug(f"Previous business day for {ref} is {d}")
             return d
+
+def is_business_day(d: date) -> bool:
+    """Check if a date is a business day (Monday-Friday)"""
+    return d.weekday() < 5
 
 def get_cutoff_time(today: date) -> datetime:
     cutoff = datetime(
@@ -114,7 +123,7 @@ def safe_int(value, default=-1):
     except (ValueError, TypeError):
         return default
 
-# ─── Earnings Calendar & Candidate Filtering ──────────────────────────────────────────────────────
+# ── Earnings Calendar & Candidate Filtering ──────────────────────────────────────────────────────────
 def fetch_earnings_calendar(fh: finnhub.Client, frm: str, to: str) -> List[dict]:
     logger.debug(f"Fetching earnings calendar from {frm} to {to}")
     try:
@@ -631,7 +640,7 @@ def preload_prev_closes(
     logger.info(f"Successfully loaded {len(out)} previous closes")
     return out
 
-# ─── Market Data Integration (Alpaca + Finnhub Fallback) ──────────────────────────────────────────
+# ── Market Data Integration (Alpaca + Finnhub Fallback) ──────────────────────────────────────────────
 def get_alpaca_quote_data(api: AlpacaREST, symbol: str, today: str) -> Dict:
     """
     Fetch current day OHLC data from Alpaca for a given symbol.
@@ -779,12 +788,6 @@ def generate_earnings_report_with_data(candidates: List[Dict], prev_closes: Dict
     """
     logger.info(f"Generating comprehensive earnings report for {len(candidates)} candidates")
     
-    report_lines = []
-    report_lines.append("=" * 120)
-    report_lines.append(f"EARNINGS REPORT - {datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    report_lines.append("=" * 120)
-    report_lines.append("")
-    
     # Collect all data first for sorting
     report_data = []
     failed_reports = 0
@@ -897,155 +900,33 @@ def generate_earnings_report_with_data(candidates: List[Dict], prev_closes: Dict
     # Sort by %change high (descending) - highest gains first
     report_data.sort(key=lambda x: x['sort_key'], reverse=True)
     
-    # Generate report with numerical values
-    successful_reports = 0
-    for rank, data in enumerate(report_data, 1):
-        if data['sort_key'] == -999:
-            continue
-            
-        successful_reports += 1
-        symbol = data['symbol']
-        
-        # Main header line with key metrics
-        report_lines.append(f"#{rank:2d} {symbol:<6} | EPS:{data['surprise']:6.1f}% | Source:{data['data_source']:<7} | PrevClose:${data['reference_prev_close']:7.2f}")
-        
-        # Price action line
-        if data['sort_key'] != -999:
-            report_lines.append(f"    OHLC: ${data['open_price']:7.2f} ${data['high_price']:7.2f}@{data['high_time']} ${data['low_price']:7.2f}@{data['low_time']} ${data['close_price']:7.2f}")
-            report_lines.append(f"    Chg%: Open:{data['pct_change_open']:+6.2f}% High:{data['pct_change_high']:+6.2f}% Low:{data['pct_change_low']:+6.2f}% Close:{data['pct_change_close']:+6.2f}%")
-        else:
-            report_lines.append(f"    OHLC: NO DATA AVAILABLE")
-            report_lines.append(f"    Chg%: NO DATA AVAILABLE")
-        
-        # Extended data line - numerical format
-        mc_val = data['market_cap']
-        mc_str = f"{mc_val:.1f}M" if mc_val > 0 else "N/A"
-        
-        rev_val = data['revenue_surprise']
-        rev_str = f"{rev_val:+.1f}%" if rev_val > -999 else "N/A"
-        
-        earnings_time_str = "AMC" if data['earnings_time'] == 1 else "BMO" if data['earnings_time'] == 0 else "N/A"
-        
-        report_lines.append(f"    Info: MCap:{mc_str:<8} Rev:{rev_str:<6} Sector:{data['sector'][:15]:<15} Time:{earnings_time_str}")
-        
-        # Pre-market data
-        pm_high = f"${data['premarket_high']:.2f}" if data['premarket_high'] > 0 else "N/A"
-        pm_low = f"${data['premarket_low']:.2f}" if data['premarket_low'] > 0 else "N/A"
-        pm_vol = f"{data['premarket_volume']:,.0f}" if data['premarket_volume'] > 0 else "N/A"
-        
-        report_lines.append(f"    PM  : High:{pm_high:<8} Low:{pm_low:<8} Volume:{pm_vol}")
-        
-        # NEW: Enhanced volume information
-        om_vol = f"{data['opening_minute_volume']:,.0f}" if data['opening_minute_volume'] > 0 else "N/A"
-        vol_30d = f"{data['volume_30_day_avg']:,.0f}" if data['volume_30_day_avg'] > 0 else "N/A"
-        vol_7d = f"{data['volume_7_day_avg']:,.0f}" if data['volume_7_day_avg'] > 0 else "N/A"
-        ratio_30d = f"{data['volume_ratio_30_day']:.2f}x" if data['volume_ratio_30_day'] > 0 else "N/A"
-        ratio_7d = f"{data['volume_ratio_7_day']:.2f}x" if data['volume_ratio_7_day'] > 0 else "N/A"
-        
-        report_lines.append(f"    Vol : OpenMin:{om_vol:<12} 30dAvg:{vol_30d:<12} 7dAvg:{vol_7d:<12}")
-        report_lines.append(f"    Ratio: vs30d:{ratio_30d:<8} vs7d:{ratio_7d:<8} H>L:{data['high_before_low']}")
-        
-        # Intraday progression
-        def format_pct(val):
-            return f"{val:+.2f}%" if val > -999 else "N/A"
-        
-        pct_1min = format_pct(data['pct_1min'])
-        pct_5min = format_pct(data['pct_5min'])
-        pct_15min = format_pct(data['pct_15min'])
-        pct_30min = format_pct(data['pct_30min'])
-        pct_1hr = format_pct(data['pct_1hr'])
-        
-        report_lines.append(f"    Time: 1m:{pct_1min:<7} 5m:{pct_5min:<7} 15m:{pct_15min:<7} 30m:{pct_30min:<7} 1h:{pct_1hr}")
-        
-        report_lines.append("")  # Separator line between stocks
+    logger.info(f"Generated data for {len(report_data)} stocks on {today}")
     
-    # Add failed reports at the end
-    if failed_reports > 0:
-        report_lines.append("FAILED REPORTS:")
-        report_lines.append("-" * 40)
-        for data in report_data:
-            if data['sort_key'] == -999:
-                report_lines.append(f"{data['symbol']:<6} | EPS:{data['surprise']:6.1f}% | NO PRICE DATA")
-        report_lines.append("")
-    
-    # Summary
-    report_lines.append("=" * 120)
-    report_lines.append("SUMMARY")
-    report_lines.append("=" * 120)
-    report_lines.append(f"Total candidates: {len(candidates)}")
-    report_lines.append(f"Successful reports: {successful_reports}")
-    report_lines.append(f"Failed reports: {failed_reports}")
-    report_lines.append(f"Data sources - Alpaca: {alpaca_success}, Finnhub fallback: {finnhub_fallback}")
-    report_lines.append("")
-    report_lines.append("LEGEND:")
-    report_lines.append("EPS%: Earnings Per Share surprise percentage")
-    report_lines.append("Rev%: Revenue surprise percentage") 
-    report_lines.append("MCap: Market capitalization in millions")
-    report_lines.append("PM: Pre-market data (4:00-9:30 AM ET)")
-    report_lines.append("Vol: Volume data - OpenMin=opening minute volume")
-    report_lines.append("Ratio: vs30d=ratio vs 30-day avg, vs7d=ratio vs 7-day avg")
-    report_lines.append("Time: Price change percentages at intervals from market open")
-    report_lines.append("H>L: 1 if daily high occurred before daily low, 0 otherwise")
-    report_lines.append("=" * 120)
-    
-    report = "\n".join(report_lines)
-    logger.info(f"Generated comprehensive earnings report with {successful_reports} successful entries")
-    
-    # Return both the formatted report and the raw data
-    return report, report_data
+    # Return the raw data (no formatted report needed for historical collection)
+    return "", report_data
 
-def generate_earnings_report(candidates: List[Dict], prev_closes: Dict[str, float], api: AlpacaREST, fh: finnhub.Client, today: str) -> str:
-    """
-    Generate comprehensive earnings report (wrapper for backward compatibility).
-    Returns only the report string.
-    """
-    report, _ = generate_earnings_report_with_data(candidates, prev_closes, api, fh, today)
-    return report
-
-def save_earnings_report(report: str, filename: str = "earningsreport.txt"):
-    """Save the earnings report to a file, appending if file exists."""
-    try:
-        with open(filename, 'a', encoding='utf-8') as f:
-            f.write(report + "\n\n")
-        logger.info(f"Earnings report saved to {filename}")
-    except Exception as e:
-        logger.error(f"Failed to save earnings report to {filename}: {e}")
-
-def save_earnings_report_csv(report_data: List[Dict], filename: str = "earnings_data.csv"):
-    """Save the earnings data as CSV, appending to existing data."""
+def save_historical_earnings_csv(all_report_data: List[Dict], filename: str = "historical_earnings_data.csv"):
+    """Save all historical earnings data as CSV."""
     import csv
     import os
     
     try:
-        if not report_data:
+        if not all_report_data:
+            logger.warning("No data to save")
             return
         
-        # Add date column to each record
-        current_date = date.today().strftime('%Y-%m-%d')
-        current_timestamp = datetime.now(TZ).isoformat()
-        
-        for data in report_data:
-            data['report_date'] = current_date
-            data['report_timestamp'] = current_timestamp
-            
         # Get all possible field names
         fieldnames = set()
-        for data in report_data:
+        for data in all_report_data:
             fieldnames.update(data.keys())
         
         fieldnames = sorted(list(fieldnames))
         
-        # Check if file exists to determine if we need headers
-        file_exists = os.path.exists(filename)
-        
-        with open(filename, 'a', newline='', encoding='utf-8') as f:
+        with open(filename, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
             
-            # Write header only if file is new or empty
-            if not file_exists or os.path.getsize(filename) == 0:
-                writer.writeheader()
-            
-            for data in report_data:
+            for data in all_report_data:
                 # Clean data for CSV - all numerical now
                 clean_row = {}
                 for field in fieldnames:
@@ -1060,13 +941,34 @@ def save_earnings_report_csv(report_data: List[Dict], filename: str = "earnings_
                         clean_row[field] = value if value is not None else -1
                 writer.writerow(clean_row)
         
-        logger.info(f"Earnings data appended to {filename} ({len(report_data)} rows added)")
+        logger.info(f"Historical earnings data saved to {filename} ({len(all_report_data)} rows)")
+        print(f"\n✓ Historical data collection complete!")
+        print(f"✓ {len(all_report_data)} records saved to {filename}")
+        print(f"✓ You can now copy this data into your existing earnings_data.csv file")
+        
     except Exception as e:
         logger.error(f"Failed to save CSV data to {filename}: {e}")
 
+def get_historical_dates() -> List[date]:
+    """Get list of business days for the past 30 days (excluding today)"""
+    historical_dates = []
+    current_date = TODAY - timedelta(days=1)  # Start from yesterday
+    
+    days_collected = 0
+    while days_collected < HISTORICAL_DAYS:
+        if is_business_day(current_date):
+            historical_dates.append(current_date)
+            days_collected += 1
+        current_date -= timedelta(days=1)
+    
+    # Reverse to process oldest to newest
+    historical_dates.reverse()
+    return historical_dates
+
 def main():
-    """Main function to run the earnings report generation."""
-    logger.info("Starting earnings report generation with integrated daily tickers generation")
+    """Main function to collect historical earnings data."""
+    logger.info("Starting historical earnings data collection")
+    logger.info(f"Collecting data for past {HISTORICAL_DAYS} business days excluding {TODAY}")
     
     # Initialize clients
     fh = finnhub.Client(api_key=FINNHUB_API_KEY)
@@ -1076,47 +978,82 @@ def main():
         base_url=ALPACA_BASE_URL
     )
     
-    # Get today's date and generate tickers
-    today = date.today()
-    logger.info(f"Generating daily tickers for date: {today}")
+    # Get historical dates
+    historical_dates = get_historical_dates()
+    logger.info(f"Processing {len(historical_dates)} business days: {historical_dates[0]} to {historical_dates[-1]}")
     
-    # Generate candidates using integrated functionality
-    candidates = generate_daily_tickers(fh, today)
-    if not candidates:
-        logger.warning(f"No candidates generated for {today}, exiting")
-        print(f"No valid tickers found for {today}. Exiting.")
-        return
+    all_report_data = []
+    total_candidates = 0
+    processed_days = 0
     
-    logger.info(f"Generated {len(candidates)} tickers for {today}:")
-    for candidate in candidates:
-        logger.debug(f"  {candidate['symbol']}: {candidate['surprise']:.1f}%")
+    for i, target_date in enumerate(historical_dates, 1):
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Processing day {i}/{len(historical_dates)}: {target_date}")
+        logger.info(f"{'='*60}")
+        
+        try:
+            # Generate candidates for this date
+            candidates = generate_daily_tickers(fh, target_date)
+            if not candidates:
+                logger.info(f"No candidates found for {target_date}, skipping")
+                continue
+            
+            logger.info(f"Found {len(candidates)} candidates for {target_date}")
+            total_candidates += len(candidates)
+            
+            # Get previous closes for this date
+            yesterday = get_prev_business_day(target_date)
+            prev_closes = preload_prev_closes(api, candidates, yesterday.strftime("%Y-%m-%d"))
+            
+            # Generate report data for this date
+            _, report_data = generate_earnings_report_with_data(
+                candidates, 
+                prev_closes, 
+                api, 
+                fh, 
+                target_date.strftime("%Y-%m-%d")
+            )
+            
+            # Add date and timestamp to each record
+            current_timestamp = datetime.now(TZ).isoformat()
+            for data in report_data:
+                data['report_date'] = target_date.strftime('%Y-%m-%d')
+                data['report_timestamp'] = current_timestamp
+            
+            all_report_data.extend(report_data)
+            processed_days += 1
+            
+            logger.info(f"✓ Processed {len(report_data)} records for {target_date}")
+            print(f"Day {i}/{len(historical_dates)} ({target_date}): {len(candidates)} candidates, {len(report_data)} records")
+            
+        except Exception as e:
+            logger.error(f"Error processing {target_date}: {e}")
+            print(f"✗ Error processing {target_date}: {e}")
+            continue
+        
+        # Add small delay between days to be respectful to APIs
+        if i < len(historical_dates):  # Don't sleep after the last day
+            time.sleep(2)
     
-    # Set up date range for previous closes
-    yesterday = get_prev_business_day(today)
-    frm = yesterday.strftime("%Y-%m-%d")
-    
-    logger.info(f"Using {frm} for previous close data")
-    
-    # Get previous closes
-    logger.info(f"Fetching previous close data for {frm}...")
-    prev_closes = preload_prev_closes(api, candidates, frm)
-    
-    # Generate report with Alpaca + Finnhub data - MODIFIED TO RETURN BOTH REPORT AND DATA
-    logger.info("Generating earnings report...")
-    report, report_data = generate_earnings_report_with_data(candidates, prev_closes, api, fh, today.strftime("%Y-%m-%d"))
-    
-    # Save reports in multiple formats - REMOVED JSON, KEPT CSV AND TXT
-    # Save human-readable text report (appends automatically)
-    save_earnings_report(report, "earnings_data.txt")
-    
-    # Save structured data for algorithms (appends to existing data) - CSV ONLY NOW
-    save_earnings_report_csv(report_data, "earnings_data.csv")
-    
-    # Also print to console (for cron logging)
-    print("\n" + report)
-    
-    logger.info(f"Earnings report generation completed for {today} with {len(candidates)} tickers")
-    logger.info(f"Data saved to: earnings_data.txt, earnings_data.csv")
+    # Save all data
+    if all_report_data:
+        save_historical_earnings_csv(all_report_data, "historical_earnings_data.csv")
+        
+        # Print summary
+        print(f"\n{'='*60}")
+        print(f"HISTORICAL DATA COLLECTION SUMMARY")
+        print(f"{'='*60}")
+        print(f"Processed days: {processed_days}/{len(historical_dates)}")
+        print(f"Total candidates found: {total_candidates}")
+        print(f"Total records collected: {len(all_report_data)}")
+        print(f"Date range: {historical_dates[0]} to {historical_dates[-1]}")
+        print(f"Output file: historical_earnings_data.csv")
+        print(f"{'='*60}")
+        
+        logger.info(f"Historical data collection completed: {len(all_report_data)} total records from {processed_days} days")
+    else:
+        logger.warning("No historical data collected")
+        print("⚠ No historical data was collected")
 
 if __name__ == "__main__":
     main()
