@@ -1,0 +1,5 @@
+{
+  "status": "failed",
+  "error": "Insufficient time span: 37 days < 61 required for walk-forward analysis",
+  "strategies": []
+}

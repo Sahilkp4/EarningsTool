@@ -1,0 +1,35 @@
+{
+  "trading_signals": [],
+  "portfolio_summary": {
+    "total_strategies": 0,
+    "recommended_strategies": 0,
+    "total_allocation_percent": 0,
+    "average_expected_return": NaN,
+    "average_sharpe_ratio": NaN,
+    "portfolio_diversification_score": 0.0
+  },
+  "analysis_metadata": {
+    "generated_timestamp": "2025-08-30T02:35:07.769573+00:00",
+    "analysis_version": "professional_v2.1_optimized",
+    "runtime_hours": 0.001,
+    "mode": "full",
+    "statistical_tests_conducted": 2,
+    "combinations_tested": 0,
+    "data_quality": {
+      "covariance_analysis_applied": true,
+      "regime_consistency_validated": true,
+      "walk_forward_tested": true,
+      "multiple_testing_corrected": true
+    }
+  },
+  "detailed_strategies": [],
+  "quick_reference": {
+    "best_strategy": {
+      "signal_id": null,
+      "buy_time": null,
+      "expected_return": null
+    },
+    "total_recommended_allocation": 0,
+    "analysis_quality": "LOW"
+  }
+}

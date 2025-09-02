@@ -1,0 +1,262 @@
+========================================================================================================================
+EARNINGS REPORT - 2025-08-20 14:07:19 EDT
+========================================================================================================================
+
+# 1 TJX    | EPS:   7.5% | Source:Finnhub | PrevClose:$ 134.62
+    OHLC: $ 133.97 $ 145.58@N/A $ 133.97@N/A $ 139.03
+    Chg%: Open: -0.48% High: +8.67% Low: +0.00% Close: +3.28%
+    Info: MCap:154903.2M Rev:+0.9%  Sector:Retail          Time:BMO
+    PM  : High:$144.00  Low:$133.50  Volume:482,833
+    Vol : OpenMin:N/A          30dAvg:N/A          7dAvg:N/A         
+    Ratio: vs30d:N/A      vs7d:N/A      H>L:-1
+    Time: 1m:N/A     5m:N/A     15m:N/A     30m:N/A     1h:N/A
+
+# 2 NESR   | EPS:  11.8% | Source:Finnhub | PrevClose:$   7.29
+    OHLC: $   8.00 $   8.50@N/A $   7.78@N/A $   8.21
+    Chg%: Open: +9.74% High: +6.25% Low: -2.81% Close:+12.55%
+    Info: MCap:815.0M   Rev:+1.4%  Sector:Energy          Time:BMO
+    PM  : High:$7.72    Low:$7.60    Volume:6,463
+    Vol : OpenMin:N/A          30dAvg:N/A          7dAvg:N/A         
+    Ratio: vs30d:N/A      vs7d:N/A      H>L:-1
+    Time: 1m:N/A     5m:N/A     15m:N/A     30m:N/A     1h:N/A
+
+# 3 IQ     | EPS: 100.0% | Source:Finnhub | PrevClose:$   2.28
+    OHLC: $   2.33 $   2.48@N/A $   2.13@N/A $   2.32
+    Chg%: Open: +2.19% High: +6.22% Low: -8.58% Close: +1.75%
+    Info: MCap:2195.3M  Rev:-3.3%  Sector:Media           Time:BMO
+    PM  : High:$2.37    Low:$2.07    Volume:2,584,364
+    Vol : OpenMin:N/A          30dAvg:N/A          7dAvg:N/A         
+    Ratio: vs30d:N/A      vs7d:N/A      H>L:-1
+    Time: 1m:N/A     5m:N/A     15m:N/A     30m:N/A     1h:N/A
+
+# 4 ADI    | EPS:   4.1% | Source:Finnhub | PrevClose:$ 230.44
+    OHLC: $ 230.22 $ 243.50@N/A $ 228.11@N/A $ 242.25
+    Chg%: Open: -0.10% High: +5.77% Low: -0.92% Close: +5.12%
+    Info: MCap:119045.0M Rev:+3.4%  Sector:Semiconductors  Time:BMO
+    PM  : High:$241.00  Low:$229.97  Volume:321,167
+    Vol : OpenMin:N/A          30dAvg:N/A          7dAvg:N/A         
+    Ratio: vs30d:N/A      vs7d:N/A      H>L:-1
+    Time: 1m:N/A     5m:N/A     15m:N/A     30m:N/A     1h:N/A
+
+# 5 LOW    | EPS:   1.0% | Source:Finnhub | PrevClose:$ 256.36
+    OHLC: $ 254.23 $ 267.52@N/A $ 254.23@N/A $ 259.12
+    Chg%: Open: -0.83% High: +5.23% Low: +0.00% Close: +1.08%
+    Info: MCap:144307.1M Rev:-1.0%  Sector:Retail          Time:BMO
+    PM  : High:$272.00  Low:$253.00  Volume:115,253
+    Vol : OpenMin:N/A          30dAvg:N/A          7dAvg:N/A         
+    Ratio: vs30d:N/A      vs7d:N/A      H>L:-1
+    Time: 1m:N/A     5m:N/A     15m:N/A     30m:N/A     1h:N/A
+
+# 6 BZ     | EPS:   9.8% | Source:Finnhub | PrevClose:$  21.07
+    OHLC: $  21.07 $  22.05@N/A $  20.27@N/A $  21.98
+    Chg%: Open: +0.00% High: +4.63% Low: -3.80% Close: +4.30%
+    Info: MCap:10131.1M Rev:-1.5%  Sector:Media           Time:BMO
+    PM  : High:$22.00   Low:$19.70   Volume:242,895
+    Vol : OpenMin:N/A          30dAvg:N/A          7dAvg:N/A         
+    Ratio: vs30d:N/A      vs7d:N/A      H>L:-1
+    Time: 1m:N/A     5m:N/A     15m:N/A     30m:N/A     1h:N/A
+
+# 7 TOL    | EPS:   2.6% | Source:Finnhub | PrevClose:$ 132.18
+    OHLC: $ 131.48 $ 136.97@N/A $ 129.97@N/A $ 133.43
+    Chg%: Open: -0.53% High: +4.18% Low: -1.15% Close: +0.94%
+    Info: MCap:13170.0M Rev:+2.4%  Sector:Consumer produc Time:AMC
+    PM  : High:$133.20  Low:$128.47  Volume:39,110
+    Vol : OpenMin:N/A          30dAvg:N/A          7dAvg:N/A         
+    Ratio: vs30d:N/A      vs7d:N/A      H>L:-1
+    Time: 1m:N/A     5m:N/A     15m:N/A     30m:N/A     1h:N/A
+
+# 8 DY     | EPS:  11.6% | Source:Finnhub | PrevClose:$ 269.57
+    OHLC: $ 244.00 $ 252.55@N/A $ 233.00@N/A $ 249.98
+    Chg%: Open: -9.49% High: +3.50% Low: -4.51% Close: -7.27%
+    Info: MCap:7061.4M  Rev:-5.0%  Sector:Construction    Time:BMO
+    PM  : High:$252.01  Low:$233.00  Volume:6,817
+    Vol : OpenMin:N/A          30dAvg:N/A          7dAvg:N/A         
+    Ratio: vs30d:N/A      vs7d:N/A      H>L:-1
+    Time: 1m:N/A     5m:N/A     15m:N/A     30m:N/A     1h:N/A
+
+# 9 CCIF   | EPS:  42.2% | Source:Finnhub | PrevClose:$   5.57
+    OHLC: $   5.55 $   5.68@N/A $   5.40@N/A $   5.50
+    Chg%: Open: -0.36% High: +2.31% Low: -2.70% Close: -1.19%
+    Info: MCap:120.8M   Rev:-8.9%  Sector:N/A             Time:AMC
+    PM  : High:$5.75    Low:$5.66    Volume:3,000
+    Vol : OpenMin:N/A          30dAvg:N/A          7dAvg:N/A         
+    Ratio: vs30d:N/A      vs7d:N/A      H>L:-1
+    Time: 1m:N/A     5m:N/A     15m:N/A     30m:N/A     1h:N/A
+
+#10 AUNA   | EPS: 107.9% | Source:Finnhub | PrevClose:$   6.30
+    OHLC: $   6.50 $   6.63@N/A $   6.05@N/A $   6.36
+    Chg%: Open: +3.17% High: +2.00% Low: -6.92% Close: +0.87%
+    Info: MCap:457.4M   Rev:-4.8%  Sector:Health Care     Time:AMC
+    PM  : High:$6.66    Low:$6.66    Volume:1,002
+    Vol : OpenMin:N/A          30dAvg:N/A          7dAvg:N/A         
+    Ratio: vs30d:N/A      vs7d:N/A      H>L:-1
+    Time: 1m:N/A     5m:N/A     15m:N/A     30m:N/A     1h:N/A
+
+#11 JKHY   | EPS:   8.7% | Source:Finnhub | PrevClose:$ 160.63
+    OHLC: $ 162.89 $ 166.13@N/A $ 158.53@N/A $ 163.70
+    Chg%: Open: +1.41% High: +1.99% Low: -2.68% Close: +1.91%
+    Info: MCap:12006.6M Rev:-0.2%  Sector:Financial Servi Time:AMC
+    PM  : High:$159.00  Low:$156.00  Volume:4,449
+    Vol : OpenMin:N/A          30dAvg:N/A          7dAvg:N/A         
+    Ratio: vs30d:N/A      vs7d:N/A      H>L:-1
+    Time: 1m:N/A     5m:N/A     15m:N/A     30m:N/A     1h:N/A
+
+#12 BIDU   | EPS:   1.9% | Source:Finnhub | PrevClose:$  89.07
+    OHLC: $  89.19 $  89.19@N/A $  84.82@N/A $  86.94
+    Chg%: Open: +0.13% High: +0.00% Low: -4.90% Close: -2.39%
+    Info: MCap:31601.5M Rev:-1.9%  Sector:Media           Time:BMO
+    PM  : High:$90.60   Low:$85.00   Volume:600,467
+    Vol : OpenMin:N/A          30dAvg:N/A          7dAvg:N/A         
+    Ratio: vs30d:N/A      vs7d:N/A      H>L:-1
+    Time: 1m:N/A     5m:N/A     15m:N/A     30m:N/A     1h:N/A
+
+========================================================================================================================
+SUMMARY
+========================================================================================================================
+Total candidates: 12
+Successful reports: 12
+Failed reports: 0
+Data sources - Alpaca: 0, Finnhub fallback: 12
+
+LEGEND:
+EPS%: Earnings Per Share surprise percentage
+Rev%: Revenue surprise percentage
+MCap: Market capitalization in millions
+PM: Pre-market data (4:00-9:30 AM ET)
+Vol: Volume data - OpenMin=opening minute volume
+Ratio: vs30d=ratio vs 30-day avg, vs7d=ratio vs 7-day avg
+Time: Price change percentages at intervals from market open
+H>L: 1 if daily high occurred before daily low, 0 otherwise
+========================================================================================================================
+
+========================================================================================================================
+EARNINGS REPORT - 2025-08-20 16:44:08 EDT
+========================================================================================================================
+
+# 1 IQ     | EPS: 100.0% | Source:Alpaca  | PrevClose:$   2.28
+    OHLC: $   2.17 $   2.48@09:44 $   2.13@09:30 $   2.32
+    Chg%: Open: -4.82% High:+14.06% Low: -1.84% Close: +1.75%
+    Info: MCap:2195.3M  Rev:-3.3%  Sector:Media           Time:BMO
+    PM  : High:$2.37    Low:$2.07    Volume:2,584,364
+    Vol : OpenMin:1,710,971    30dAvg:22,183,962   7dAvg:33,125,166  
+    Ratio: vs30d:0.08x    vs7d:0.05x    H>L:0
+    Time: 1m:+2.30%  5m:+4.10%  15m:+13.36% 30m:+7.83%  1h:+7.60%
+
+# 2 NESR   | EPS:  11.8% | Source:Alpaca  | PrevClose:$   7.29
+    OHLC: $   7.89 $   8.50@11:10 $   7.78@09:30 $   8.31
+    Chg%: Open: +8.23% High: +7.73% Low: -1.46% Close:+13.99%
+    Info: MCap:815.0M   Rev:+1.4%  Sector:Energy          Time:BMO
+    PM  : High:$7.72    Low:$7.60    Volume:6,463
+    Vol : OpenMin:43,643       30dAvg:613,058      7dAvg:549,007     
+    Ratio: vs30d:0.07x    vs7d:0.08x    H>L:0
+    Time: 1m:+0.00%  5m:-0.13%  15m:+3.17%  30m:+5.45%  1h:+3.80%
+
+# 3 DY     | EPS:  11.6% | Source:Alpaca  | PrevClose:$ 269.57
+    OHLC: $ 240.00 $ 258.49@15:57 $ 233.00@09:31 $ 257.26
+    Chg%: Open:-10.97% High: +7.70% Low: -2.92% Close: -4.57%
+    Info: MCap:7061.4M  Rev:-5.0%  Sector:Construction    Time:BMO
+    PM  : High:$252.01  Low:$233.00  Volume:6,817
+    Vol : OpenMin:24,178       30dAvg:300,271      7dAvg:496,705     
+    Ratio: vs30d:0.08x    vs7d:0.05x    H>L:0
+    Time: 1m:+0.54%  5m:+3.45%  15m:+2.59%  30m:-0.95%  1h:-1.48%
+
+# 4 BZ     | EPS:   9.8% | Source:Alpaca  | PrevClose:$  21.07
+    OHLC: $  20.77 $  22.23@15:54 $  20.27@09:30 $  22.08
+    Chg%: Open: -1.40% High: +7.00% Low: -2.43% Close: +4.79%
+    Info: MCap:10131.1M Rev:-1.5%  Sector:Media           Time:BMO
+    PM  : High:$22.00   Low:$19.70   Volume:242,895
+    Vol : OpenMin:216,796      30dAvg:3,136,934    7dAvg:3,870,137   
+    Ratio: vs30d:0.07x    vs7d:0.06x    H>L:0
+    Time: 1m:-1.16%  5m:+0.72%  15m:-0.22%  30m:-0.46%  1h:+1.47%
+
+# 5 TOL    | EPS:   2.6% | Source:Alpaca  | PrevClose:$ 132.18
+    OHLC: $ 131.01 $ 136.97@10:12 $ 129.97@09:30 $ 131.43
+    Chg%: Open: -0.89% High: +4.55% Low: -0.79% Close: -0.57%
+    Info: MCap:13170.0M Rev:+2.4%  Sector:Consumer produc Time:AMC
+    PM  : High:$133.20  Low:$128.47  Volume:39,110
+    Vol : OpenMin:2,386        30dAvg:1,611,812    7dAvg:1,741,222   
+    Ratio: vs30d:0.00x    vs7d:0.00x    H>L:0
+    Time: 1m:-0.79%  5m:+2.44%  15m:+3.06%  30m:+3.76%  1h:+2.96%
+
+# 6 JKHY   | EPS:   8.7% | Source:Alpaca  | PrevClose:$ 160.63
+    OHLC: $ 159.00 $ 166.13@10:38 $ 158.53@09:30 $ 163.80
+    Chg%: Open: -1.01% High: +4.49% Low: -0.30% Close: +1.97%
+    Info: MCap:12006.6M Rev:-0.2%  Sector:Financial Servi Time:AMC
+    PM  : High:$159.00  Low:$156.00  Volume:4,449
+    Vol : OpenMin:22,584       30dAvg:617,928      7dAvg:981,491     
+    Ratio: vs30d:0.04x    vs7d:0.02x    H>L:0
+    Time: 1m:+1.18%  5m:+4.21%  15m:+2.60%  30m:+3.81%  1h:+3.85%
+
+# 7 ADI    | EPS:   4.1% | Source:Alpaca  | PrevClose:$ 230.44
+    OHLC: $ 239.69 $ 245.64@16:00 $ 228.11@10:17 $ 245.24
+    Chg%: Open: +4.01% High: +2.48% Low: -4.83% Close: +6.42%
+    Info: MCap:119045.0M Rev:+3.4%  Sector:Semiconductors  Time:BMO
+    PM  : High:$241.00  Low:$229.97  Volume:321,167
+    Vol : OpenMin:93,825       30dAvg:3,384,544    7dAvg:3,585,916   
+    Ratio: vs30d:0.03x    vs7d:0.03x    H>L:0
+    Time: 1m:-0.39%  5m:-1.50%  15m:-1.40%  30m:-1.32%  1h:-2.23%
+
+# 8 BIDU   | EPS:   1.9% | Source:Alpaca  | PrevClose:$  89.07
+    OHLC: $  86.20 $  87.98@10:24 $  84.82@09:31 $  86.72
+    Chg%: Open: -3.22% High: +2.06% Low: -1.61% Close: -2.64%
+    Info: MCap:31601.5M Rev:-1.9%  Sector:Media           Time:BMO
+    PM  : High:$90.60   Low:$85.00   Volume:600,467
+    Vol : OpenMin:268,038      30dAvg:4,189,228    7dAvg:4,168,095   
+    Ratio: vs30d:0.06x    vs7d:0.06x    H>L:0
+    Time: 1m:-1.05%  5m:-0.64%  15m:+0.83%  30m:+0.69%  1h:+1.22%
+
+# 9 TJX    | EPS:   7.5% | Source:Alpaca  | PrevClose:$ 134.62
+    OHLC: $ 143.53 $ 145.58@09:30 $ 137.76@15:57 $ 138.27
+    Chg%: Open: +6.62% High: +1.42% Low: -4.02% Close: +2.71%
+    Info: MCap:154903.2M Rev:+0.9%  Sector:Retail          Time:BMO
+    PM  : High:$144.00  Low:$133.50  Volume:482,833
+    Vol : OpenMin:37,874       30dAvg:4,791,283    7dAvg:4,956,551   
+    Ratio: vs30d:0.01x    vs7d:0.01x    H>L:1
+    Time: 1m:+1.36%  5m:-0.29%  15m:-1.24%  30m:-1.76%  1h:-1.93%
+
+#10 AUNA   | EPS: 107.9% | Source:Alpaca  | PrevClose:$   6.30
+    OHLC: $   6.55 $   6.63@09:38 $   6.05@10:53 $   6.31
+    Chg%: Open: +3.97% High: +1.22% Low: -7.63% Close: +0.16%
+    Info: MCap:457.4M   Rev:-4.8%  Sector:Health Care     Time:AMC
+    PM  : High:$6.66    Low:$6.66    Volume:1,002
+    Vol : OpenMin:3,956        30dAvg:23,975       7dAvg:17,558      
+    Ratio: vs30d:0.17x    vs7d:0.23x    H>L:1
+    Time: 1m:-0.46%  5m:+0.69%  15m:-4.43%  30m:-5.04%  1h:-3.66%
+
+#11 CCIF   | EPS:  42.2% | Source:Alpaca  | PrevClose:$   5.57
+    OHLC: $   5.63 $   5.68@09:31 $   5.40@10:31 $   5.51
+    Chg%: Open: +1.08% High: +0.86% Low: -4.08% Close: -1.08%
+    Info: MCap:120.8M   Rev:-8.9%  Sector:N/A             Time:AMC
+    PM  : High:$5.75    Low:$5.66    Volume:3,000
+    Vol : OpenMin:3,971        30dAvg:217,364      7dAvg:273,552     
+    Ratio: vs30d:0.02x    vs7d:0.01x    H>L:1
+    Time: 1m:-0.67%  5m:-1.49%  15m:-3.11%  30m:-2.49%  1h:-2.64%
+
+#12 LOW    | EPS:   1.0% | Source:Alpaca  | PrevClose:$ 256.36
+    OHLC: $ 265.39 $ 267.52@09:30 $ 256.45@10:29 $ 257.14
+    Chg%: Open: +3.52% High: +0.80% Low: -3.37% Close: +0.30%
+    Info: MCap:144307.1M Rev:-1.0%  Sector:Retail          Time:BMO
+    PM  : High:$272.00  Low:$253.00  Volume:115,253
+    Vol : OpenMin:13,841       30dAvg:2,886,292    7dAvg:3,719,295   
+    Ratio: vs30d:0.00x    vs7d:0.00x    H>L:1
+    Time: 1m:+0.31%  5m:-0.91%  15m:-2.43%  30m:-2.50%  1h:-3.26%
+
+========================================================================================================================
+SUMMARY
+========================================================================================================================
+Total candidates: 12
+Successful reports: 12
+Failed reports: 0
+Data sources - Alpaca: 12, Finnhub fallback: 0
+
+LEGEND:
+EPS%: Earnings Per Share surprise percentage
+Rev%: Revenue surprise percentage
+MCap: Market capitalization in millions
+PM: Pre-market data (4:00-9:30 AM ET)
+Vol: Volume data - OpenMin=opening minute volume
+Ratio: vs30d=ratio vs 30-day avg, vs7d=ratio vs 7-day avg
+Time: Price change percentages at intervals from market open
+H>L: 1 if daily high occurred before daily low, 0 otherwise
+========================================================================================================================
+

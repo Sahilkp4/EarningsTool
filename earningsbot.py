@@ -28,17 +28,17 @@ APCA_KEY        = os.getenv("APCA_API_KEY_ID")
 APCA_SECRET     = os.getenv("APCA_API_SECRET_KEY")
 ALPACA_BASE_URL = "https://paper-api.alpaca.markets"
 
-STOP_LOSS_FACTOR   = 0.975 # percentage of total to stop loss at
-TARGET_FACTOR      = 1.04 # percentage of total to target
 MONITOR_END_HOUR   = 15 #end hour
 MONITOR_END_MINUTE = 33 #end minute
 
 SURPRISE_THRESHOLD = 1 # % min earnings suprise
 MAX_SURPRISE       = 600 # max suprise
 MC_THRESHOLD       = 900_000_000 # market cap in millions of dollars
-MIN_PCT_INCREASE   = 1  # Minimum threshold for % increase at open
-MAX_PCT_INCREASE   = 15.00 # Maximum threshold for % increase at open
 TRAIL_PERCENT      = 0.1  # 0.1%- very tight trailing stop
+
+# NEW GLOBAL VARIABLES FOR JSON-DRIVEN TRADING
+TOTAL_ACCOUNT_PCT = 100  # Percentage of total account to use for trading
+TARGET_PROFIT_FACTOR = 1.5  # Multiplier for target profit from JSON bins
 
 ALPACA_WS_URL = "wss://stream.data.alpaca.markets/v2/iex"  # or v2/crypto or v2/stocks, adjust as needed
 ALPACA_MAX_SUBSCRIBE = 30
@@ -284,565 +284,6 @@ def group_candidates_by_surprise(
     
     return sorted_c
 
-#1 Opening Function
-async def get_opening_prices_with_window(
-    symbols: List[str],
-    finnhub_key: str,
-    api: AlpacaREST,
-    prev_close: Dict[str, float],
-    window_seconds: int = 15,
-    max_rest_symbols: int = 50
-) -> Optional[Dict[str, float]]:
-    """
-    Find opening prices with a two-phase approach:
-    1. Race to find the FIRST candidate that meets minimum criteria
-    2. Once found, wait 15 seconds to see if better candidates emerge
-    """
-    logger.info("Waiting for market to open...")
-    sleep_until_market_open(api)
-    time.sleep(1)
-    logger.info(f"Market is open. Racing to find first viable candidate from {len(symbols)} symbols")
-
-    # Calculate cutoff time (9:31:01 America/New_York)
-    now = datetime.now(TZ)
-    cutoff_time = now.replace(hour=9, minute=31, second=1, microsecond=0)
-    
-    # If we're already past cutoff, exit immediately
-    if now > cutoff_time:
-        logger.error(f"❌ Already past cutoff time of 9:31:01 ({cutoff_time}) - exiting")
-        raise RuntimeError("Already past cutoff time of 9:31:01")
-
-    # For large candidate lists, prioritize WebSocket for all symbols
- 
-    rest_symbols = symbols[:max_rest_symbols] if len(symbols) > max_rest_symbols else symbols
-
-    if len(symbols) > max_rest_symbols:
-        logger.info(f"Large candidate list detected. WebSocket: all {len(symbols)}, REST API: top {len(rest_symbols)}")
-
-    # Shared state
-    results = {}
-    pending_symbols = set(symbols)  # WebSocket tracks all symbols
-    pending_rest_symbols = set(rest_symbols)  # REST API tracks subset
-    results_lock = asyncio.Lock()
-    first_viable_found = asyncio.Event()
-    cutoff_reached = asyncio.Event()
-    first_viable_time = None
-
-    # Start cutoff monitor task
-    cutoff_monitor_task = asyncio.create_task(
-        monitor_cutoff_time(cutoff_time, cutoff_reached)
-    )
-
-    # Start both data fetchers
-    websocket_task = asyncio.create_task(
-        websocket_price_fetcher(
-            symbols, finnhub_key, prev_close, results, pending_symbols,
-            results_lock, first_viable_found, cutoff_reached
-        )
-    )
-
-    alpaca_ws_task = asyncio.create_task(
-    alpaca_websocket_price_fetcher(
-        symbols, APCA_KEY, APCA_SECRET, prev_close, results, pending_symbols,
-        results_lock, first_viable_found, cutoff_reached
-    )
-)
-
-    try:
-        # Phase 1: Wait for first viable candidate OR cutoff time
-        logger.info(f"Phase 1: Racing to find first candidate with {MIN_PCT_INCREASE}%-{MAX_PCT_INCREASE}% increase...")
-        
-        # Wait for either first viable candidate or cutoff time
-        done, pending = await asyncio.wait(
-            [
-                asyncio.create_task(first_viable_found.wait()),
-                asyncio.create_task(cutoff_reached.wait())
-            ],
-            return_when=asyncio.FIRST_COMPLETED
-        )
-        
-        # Cancel any pending tasks
-        for task in pending:
-            task.cancel()
-        
-        # Check if cutoff was reached first
-        if cutoff_reached.is_set():
-            logger.error(f"❌ Cutoff time of 9:31:01 reached without finding viable candidates - exiting")
-            raise RuntimeError("No viable candidate found before 9:31:01")
-        
-        # First viable candidate was found
-        first_viable_time = time.monotonic()
-        
-        async with results_lock:
-            viable_candidates = [
-                (symbol, data) for symbol, data in results.items()
-                if MIN_PCT_INCREASE <= data["pct_increase"] <= MAX_PCT_INCREASE
-            ]
-
-        logger.info(f"🎯 First viable candidate found! Starting {window_seconds}s window for better options...")
-
-        # Phase 2: Wait additional time for potentially better candidates
-        window_start = time.monotonic()
-        while (time.monotonic() - window_start) < window_seconds:
-            # Check if cutoff time reached during window
-            if cutoff_reached.is_set():
-                logger.warning("Cutoff time reached during collection window - proceeding with current results")
-                break
-                
-            await asyncio.sleep(0.1)
-
-            # Check if we found significantly better candidates
-            async with results_lock:
-                current_viable = [
-                    (symbol, data) for symbol, data in results.items()
-                    if MIN_PCT_INCREASE <= data["pct_increase"] <= MAX_PCT_INCREASE
-                ]
-
-                if len(current_viable) > len(viable_candidates):
-                    logger.info(f"Found {len(current_viable)} viable candidates so far...")
-                    viable_candidates = current_viable
-
-        logger.info(f"Phase 2 complete. Final evaluation of {len(viable_candidates)} candidates.")
-
-    finally:
-        # Cancel all tasks
-        cutoff_monitor_task.cancel()
-        websocket_task.cancel()
-        alpaca_ws_task.cancel()
-        await asyncio.gather(
-            cutoff_monitor_task, websocket_task, alpaca_ws_task,
-            return_exceptions=True
-        )
-
-    # Select best candidate from viable options
-    best_candidate = select_best_candidate(results, MIN_PCT_INCREASE, MAX_PCT_INCREASE)
-
-    # Return the best candidate for main() to handle buying
-    return best_candidate
-
-
-
-async def monitor_cutoff_time(cutoff_time: datetime, cutoff_reached: asyncio.Event):
-    """Monitor for cutoff time and signal when reached"""
-    while True:
-        #REAL CLOCK
-        now = datetime.now(TZ)
-       
-        if now >= cutoff_time:
-            logger.info(f"Cutoff time {cutoff_time} reached")
-            cutoff_reached.set()
-            break
-        
-        # Check every 100ms for precision
-        await asyncio.sleep(0.1)
-
-
-# 2. WEBSOCKET FUNCTION WITH PING/PONG AND CUTOFF MONITORING FINNHUB
-async def websocket_price_fetcher(
-    symbols: List[str],
-    finnhub_key: str,
-    prev_close: Dict[str, float],
-    results: Dict,
-    pending_symbols: Set[str],
-    results_lock: asyncio.Lock,
-    first_viable_found: asyncio.Event,
-    cutoff_reached: asyncio.Event,
-):
-    """WebSocket price fetching task with ping/pong monitoring and cutoff checking"""
-    uri = f"wss://ws.finnhub.io?token={finnhub_key}"
-    connection_attempts = 0
-    max_attempts = 5
-
-    while connection_attempts < max_attempts:
-        try:
-            # Check if cutoff reached before attempting connection
-            if cutoff_reached.is_set():
-                logger.debug("FINNHUB WebSocket: Cutoff time reached, exiting")
-                break
-                
-            logger.debug(f"FINNHUB WebSocket connection attempt {connection_attempts + 1}")
-
-            # Add ping interval for connection monitoring
-            async with websockets.connect(
-                uri,
-                ping_interval=20,  # Send ping every 20 seconds
-                ping_timeout=10,   # Wait 10 seconds for pong
-                close_timeout=5
-            ) as ws:
-                logger.info("FINNHUB WebSocket connected, subscribing to symbols")
-
-                # Subscribe to all symbols
-                for symbol in symbols:
-                    # Check cutoff before each subscription
-                    if cutoff_reached.is_set():
-                        logger.debug("FINNHUB WebSocket: Cutoff reached during subscription, exiting")
-                        return
-                        
-                    subscribe_msg = json.dumps({"type": "subscribe", "symbol": symbol})
-                    await ws.send(subscribe_msg)
-                    await asyncio.sleep(0.05)
-
-                logger.info("FINNHUB WebSocket ready, listening for trades...")
-
-                # Track last message time for additional monitoring
-                last_message_time = time.monotonic()
-                heartbeat_interval = 30  # Log heartbeat every 30 seconds
-
-                while True:
-                    # Check cutoff time at start of each loop
-                    if cutoff_reached.is_set():
-                        logger.debug("FINNHUB WebSocket: Cutoff time reached, closing connection")
-                        break
-                        
-                    try:
-                        # Wait for message with timeout
-                        raw = await asyncio.wait_for(ws.recv(), timeout=1.0)  # Reduced timeout for faster cutoff response
-                        last_message_time = time.monotonic()
-
-                        data = json.loads(raw)
-
-                        # Handle different message types
-                        if data.get("type") == "trade":
-                            found_viable = await process_websocket_trades(
-                                data, prev_close, results, pending_symbols,
-                                results_lock
-                            )
-
-                            # Signal if we found first viable candidate
-                            if found_viable and not first_viable_found.is_set():
-                                first_viable_found.set()
-
-                        elif data.get("type") == "ping":
-                            # Respond to server ping
-                            pong_msg = json.dumps({"type": "pong"})
-                            await ws.send(pong_msg)
-                            logger.debug("Responded to Finnhub WebSocket ping")
-
-                        elif data.get("type") in ["error", "status"]:
-                            logger.debug(f"Finnhub WebSocket {data.get('type')}: {data}")
-
-                    except asyncio.TimeoutError:
-                        # Check if we should send a heartbeat log
-                        current_time = time.monotonic()
-                        if current_time - last_message_time > heartbeat_interval:
-                            logger.debug("Finnhub WebSocket waiting for data (connection alive)")
-                            last_message_time = current_time
-                        continue
-
-                    except websockets.exceptions.ConnectionClosed as e:
-                        logger.warning(f"Finnhub WebSocket connection closed: {e}")
-                        break
-
-        except asyncio.CancelledError:
-            logger.debug("Finnhub WebSocket task cancelled")
-            break
-        except Exception as e:
-            connection_attempts += 1
-            logger.error(f"Finnhub WebSocket error (attempt {connection_attempts}): {e}")
-            if connection_attempts < max_attempts and not cutoff_reached.is_set():
-                await asyncio.sleep(2)
-            else:
-                logger.error("Finnhub Max WebSocket connection attempts reached or cutoff time reached")
-                break
-
-
-async def alpaca_websocket_price_fetcher(
-    symbols: List[str],
-    apca_key: str,
-    apca_secret: str,
-    prev_close: Dict[str, float],
-    results: Dict,
-    pending_symbols: Set[str],
-    results_lock: asyncio.Lock,
-    first_viable_found: asyncio.Event,
-    cutoff_reached: asyncio.Event
-):
-    """
-    Alpaca websocket price fetcher with 30-channel limit, rotation every 5 seconds,
-    and consistent logging + cutoff monitoring.
-    """
-    connection_attempts = 0
-    max_attempts = 5
-
-    # Alpaca market data stream endpoint
-    uri = ALPACA_WS_URL
-
-    while connection_attempts < max_attempts:
-        try:
-            if cutoff_reached.is_set():
-                logger.debug("Alpaca WS: Cutoff time reached before connection, exiting")
-                break
-
-            logger.debug(f"Alpaca WS connection attempt {connection_attempts + 1}")
-
-            async with websockets.connect(uri, ping_interval=20, ping_timeout=10, close_timeout=5) as ws:
-                logger.info("Alpaca WS connected, authenticating")
-
-                # authenticate
-                auth_msg = json.dumps({
-                    "action": "auth",
-                    "key": apca_key,
-                    "secret": apca_secret
-                })
-                await ws.send(auth_msg)
-
-                # wait for auth response
-                auth_resp = await ws.recv()
-                auth_data = json.loads(auth_resp)
-                logger.debug(f"Alpaca WS auth response: {auth_data}")
-                
-                # Fix: Check for the correct authentication response format
-                # Alpaca returns [{'T': 'success', 'msg': 'connected'}] for successful connection
-                # Then sends [{'T': 'success', 'msg': 'authenticated'}] after auth
-                if not auth_data or auth_data[0].get("T") != "success":
-                    raise RuntimeError(f"Alpaca WS auth failed: {auth_data}")
-                
-                # If we get 'connected' message, we need to wait for 'authenticated' message
-                if auth_data[0].get("msg") == "connected":
-                    logger.debug("Alpaca WS connected, waiting for authentication confirmation")
-                    # Wait for the actual authentication response
-                    auth_resp2 = await ws.recv()
-                    auth_data2 = json.loads(auth_resp2)
-                    logger.debug(f"Alpaca WS second auth response: {auth_data2}")
-                    
-                    if not auth_data2 or auth_data2[0].get("msg") != "authenticated":
-                        raise RuntimeError(f"Alpaca WS authentication failed: {auth_data2}")
-                
-                elif auth_data[0].get("msg") == "authenticated":
-                    logger.debug("Alpaca WS authenticated in single response")
-                else:
-                    raise RuntimeError(f"Alpaca WS unexpected auth response: {auth_data}")
-
-                logger.info("Alpaca WS authenticated successfully")
-
-                # start subscribing in chunks of 30
-                chunk_size = 30
-                current_chunk_idx = 0
-                num_chunks = (len(symbols) + chunk_size - 1) // chunk_size
-                last_message_time = time.monotonic()
-                heartbeat_interval = 30
-
-                while not cutoff_reached.is_set():
-                    # calculate current chunk
-                    chunk_start = current_chunk_idx * chunk_size
-                    chunk_symbols = symbols[chunk_start:chunk_start + chunk_size]
-                    if not chunk_symbols:
-                        break
-
-                    # subscribe
-                    subscribe_msg = json.dumps({
-                        "action": "subscribe",
-                        "trades": chunk_symbols
-                    })
-                    await ws.send(subscribe_msg)
-                    logger.info(f"Alpaca WS subscribed to symbols: {chunk_symbols}")
-
-                    chunk_start_time = time.monotonic()
-
-                    while not cutoff_reached.is_set():
-                        # rotate after 5 seconds
-                        if time.monotonic() - chunk_start_time > 5:
-                            unsub_msg = json.dumps({
-                                "action": "unsubscribe",
-                                "trades": chunk_symbols
-                            })
-                            await ws.send(unsub_msg)
-                            logger.info(f"Alpaca WS unsubscribed from symbols: {chunk_symbols}")
-
-                            current_chunk_idx = (current_chunk_idx + 1) % num_chunks
-                            break  # move to next chunk
-
-                        try:
-                            raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
-                            last_message_time = time.monotonic()
-                            data = json.loads(raw)
-
-                            for msg in data:
-                                if msg.get("T") == "t":  # trade
-                                    # normalize to finnhub-style structure
-                                    adapted_data = {
-                                        "data": [
-                                            {
-                                                "s": msg["S"],
-                                                "p": msg["p"],
-                                                "t": msg["t"]
-                                            }
-                                        ]
-                                    }
-                                    found_viable = await process_websocket_trades(
-                                        adapted_data, prev_close, results,
-                                        pending_symbols, results_lock
-                                    )
-
-                                    if found_viable and not first_viable_found.is_set():
-                                        first_viable_found.set()
-
-                                elif msg.get("T") == "error":
-                                    logger.warning(f"Alpaca WS error message: {msg}")
-                                elif msg.get("T") in ["subscription", "success"]:
-                                    logger.debug(f"Alpaca WS status: {msg}")
-                        except asyncio.TimeoutError:
-                            # heartbeat logging
-                            current_time = time.monotonic()
-                            if current_time - last_message_time > heartbeat_interval:
-                                logger.debug("Alpaca WS waiting for data (connection alive)")
-                                last_message_time = current_time
-                            continue
-
-                # once cutoff or finished
-                logger.debug("Alpaca WS exiting main loop")
-                break  # successful run, do not reconnect
-
-        except asyncio.CancelledError:
-            logger.debug("Alpaca WS task cancelled")
-            break
-        except Exception as e:
-            connection_attempts += 1
-            logger.error(f"Alpaca WS error (attempt {connection_attempts}): {e}")
-            if connection_attempts < max_attempts and not cutoff_reached.is_set():
-                await asyncio.sleep(2)
-            else:
-                logger.error("Max Alpaca WS connection attempts reached or cutoff time reached")
-                break
-
-
-#  HELPER FUNCTIONS
-async def process_websocket_trades(
-    data: Dict,
-    prev_close: Dict[str, float],
-    results: Dict,
-    pending_symbols: Set[str],
-    results_lock: asyncio.Lock,
-) -> bool:
-    """Process trade data from WebSocket, return True if viable candidate found"""
-    found_viable = False
-
-    for trade in data.get("data", []):
-        symbol = trade.get("s")
-        price = trade.get("p")
-        timestamp = trade.get("t", 0)
-
-        if symbol and price and symbol in pending_symbols:
-            async with results_lock:
-                if symbol in pending_symbols:
-                    pending_symbols.remove(symbol)
-
-                    pct_increase = calculate_percentage_increase(symbol, price, prev_close)
-                    results[symbol] = {
-                        "price": price,
-                        "pct_increase": pct_increase,
-                        "source": "websocket",
-                        "timestamp": timestamp
-                    }
-
-                    # ✅ FIX: Robust handling for both Finnhub (int) and Alpaca (str) timestamps
-                    if timestamp:
-                        if isinstance(timestamp, str):
-                            try:
-                                trade_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                            except Exception as e:
-                                logger.warning(f"Invalid timestamp format: {timestamp} ({e})")
-                                trade_time = "now"
-                        else:
-                            trade_time = datetime.fromtimestamp(timestamp / 1000)
-                    else:
-                        trade_time = "now"
-
-                    if MIN_PCT_INCREASE <= pct_increase <= MAX_PCT_INCREASE:
-                        logger.info(f"🔥 VIABLE WebSocket: {symbol} @ ${price:.2f} ({pct_increase:.2f}%) at {trade_time}")
-                        found_viable = True
-                    elif pct_increase > MAX_PCT_INCREASE:
-                        logger.info(f"🚫 REJECTED WebSocket: {symbol} @ ${price:.2f} ({pct_increase:.2f}%) - exceeds {MAX_PCT_INCREASE}% max")
-                    else:
-                        logger.info(f"📊 WebSocket: {symbol} @ ${price:.2f} ({pct_increase:.2f}%) - below threshold")
-
-    return found_viable
-
-
-
-def calculate_percentage_increase(symbol: str, price: float, prev_close: Dict[str, float]) -> float:
-    """Calculate percentage increase from previous close"""
-    if symbol in prev_close:
-        pct_increase = (price - prev_close[symbol]) / prev_close[symbol] * 100
-        return pct_increase
-    return 0.0
-
-
-# 5. SELECT BEST CANDIDATE FUNCTION
-def select_best_candidate(results: Dict, min_pct_increase: float, max_pct_increase: float) -> Optional[Dict[str, float]]:
-    """Select the best candidate from viable results"""
-    viable_candidates = [
-        (symbol, data) for symbol, data in results.items()
-        if min_pct_increase <= data["pct_increase"] <= max_pct_increase
-    ]
-
-    if not viable_candidates:
-        logger.warning(f"No viable candidates found meeting criteria ({min_pct_increase}%-{max_pct_increase}%)")
-        return None
-
-    # Sort by percentage increase (descending)
-    viable_candidates.sort(key=lambda x: x[1]["pct_increase"], reverse=True)
-
-    best_symbol, best_data = viable_candidates[0]
-
-    logger.info(f"🏆 SELECTED: {best_symbol} @ {best_data['pct_increase']:.2f}% "
-               f"(${best_data['price']:.2f}, source: {best_data['source']})")
-
-    if len(viable_candidates) > 1:
-        other_candidates = [(s, f"{d['pct_increase']:.2f}%") for s, d in viable_candidates[1:]]
-        logger.info(f"Other viable candidates: {other_candidates}")
-
-    return {
-        "symbol": best_symbol,
-        "price": best_data["price"],
-        "pct_increase": best_data["pct_increase"],
-        "source": best_data["source"]
-    }
-# 6. EVALUATE AND BUY FUNCTION
-def evaluate_candidates_and_buy(
-    api: AlpacaREST,
-    best_candidate: Optional[dict]
-) -> Optional[dict]:
-    """
-    Execute buy order for the best candidate that met the criteria (if any)
-    Returns order details if successful, None if failed
-    """
-    if not best_candidate:
-        logger.info("No candidates met the 3% increase threshold")
-        return None
-
-    sym = best_candidate["symbol"]
-    price = best_candidate["price"]
-    pct_increase = best_candidate["pct_increase"]
-
-    # Double-check market is open
-    """
-    #FAKE CLOCK !!!!
-    class FakeClock:
-        is_open = True
-        timestamp = datetime(2025, 6, 25, 9, 30, 0, tzinfo=ZoneInfo("America/New_York"))
-    clock = FakeClock()
-    """
-    # REAL CLOCK !!!
-    clock = api.get_clock()
-
-    if not clock.is_open:
-        logger.info("Market not open yet — waiting before placing buy order...")
-        sleep_until_market_open(api)
-
-    logger.info(f"📈 Best candidate: {sym} with {pct_increase:.2f}% increase - executing buy!")
-
-    # Place the buy order and return the order details
-    order_result = place_buy_order(api, sym, price)
-
-    if order_result:
-        logger.info(f"✅ Successfully executed buy order for {sym}")
-        return order_result
-    else:
-        logger.error(f"❌ Failed to execute buy order for {sym}")
-        return None
-
-
 def preload_prev_closes(
     api: AlpacaREST,
     candidates: List[Dict[str, float]],
@@ -875,456 +316,819 @@ def preload_prev_closes(
     return out
 
 
-# 7. BUY!!!!!
-def place_buy_order(api: AlpacaREST, symbol: str, price: float) -> dict:
-    """
-    1) Submit market buy with bracket order including stop-loss and very wide take-profit.
-    2) Poll until filled.
-    3) Return dict with symbol, qty, filled price, and child order IDs for later cancellation.
-    """
+# ─── NEW JSON-DRIVEN TRADING FUNCTIONS ──────────────────────────────────────
+
+def load_earnings_bins(filepath: str = "earnings_bins.json") -> Dict:
+    """Load earnings bins configuration from JSON file"""
     try:
-        account = api.get_account()
-        cash = float(account.cash)
-        logger.debug(f"Account cash available: ${cash:.2f}")
-        
-        qty = int(cash // price)
-        if qty <= 0:
-            logger.error(f"Insufficient funds: cash=${cash:.2f}, price=${price:.2f}")
-            return {}
-        
-        stop_loss_price = round(price * STOP_LOSS_FACTOR, 2)
-        # Set take profit very wide (e.g., 10x the target factor) to avoid interference
-        wide_take_profit_price = round(price * (TARGET_FACTOR * 10), 2)
-        
-        logger.info(f"Submitting BRACKET BUY order: {symbol} qty={qty} @ approx ${price:.2f}")
-        logger.info(f"  Stop-loss: ${stop_loss_price:.2f}")
-        logger.info(f"  Wide take-profit: ${wide_take_profit_price:.2f} (will be cancelled when target hit)")
-        
-        order = api.submit_order(
-            symbol=symbol,
-            qty=qty,
-            side="buy",
-            type="market",
-            time_in_force="gtc",
-            order_class="bracket",
-            stop_loss={"stop_price": stop_loss_price},
-            take_profit={"limit_price": wide_take_profit_price}
-        )
-        logger.info(f"Bracket order submitted with ID: {order.id}")
-        
-        # Poll until main order is filled
-        poll_count = 0
-        while True:
-            o = api.get_order(order.id)
-            logger.debug(f"Order {order.id} status={o.status} (poll {poll_count + 1})")
-            
-            if o.status in ["filled", "partially_filled"]:
-                filled_price = float(o.filled_avg_price)
-                filled_qty = int(o.filled_qty)
-                logger.info(f"🎉 Order {order.id} FILLED: {filled_qty} shares @ ${filled_price:.2f}")
-                
-                # Get child orders (stop-loss and take-profit) for later management
-                child_orders = []
-                try:
-                    # Wait a moment for child orders to be created
-                    time.sleep(1)
-                    all_orders = api.list_orders(status="open", symbols=[symbol])
-                    for child_order in all_orders:
-                        if hasattr(child_order, 'parent_id') and child_order.parent_id == order.id:
-                            child_orders.append({
-                                "id": child_order.id,
-                                "type": child_order.order_type,
-                                "side": child_order.side
-                            })
-                            logger.info(f"Found child order: {child_order.id} ({child_order.order_type})")
-                except Exception as e:
-                    logger.warning(f"Could not retrieve child orders: {e}")
-                
-                return {
-                    "symbol": symbol,
-                    "qty": filled_qty,
-                    "filled_avg_price": filled_price,
-                    "order_id": order.id,
-                    "child_orders": child_orders
-                }
-            
-            elif o.status in ["rejected", "canceled", "expired"]:
-                logger.error(f"Order {order.id} failed with status: {o.status}")
-                return {}
-            
-            poll_count += 1
-            time.sleep(0.5)
-    
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+        logger.info(f"✅ Loaded earnings bins from {filepath}")
+        logger.info(f"   Minimum candidates required: {data['metadata']['minimum_candidates_analysis']['recommended_minimum']}")
+        logger.info(f"   Number of bins: {len(data['bins'])}")
+        return data
     except Exception as e:
-        logger.error(f"Buy order failed for {symbol}: {e}")
-        return {}
+        logger.error(f"❌ Failed to load earnings bins from {filepath}: {e}")
+        raise
 
+def find_bin_for_percentage(pct_increase: float, bins: List[Dict]) -> Optional[Dict]:
+    """Find the appropriate bin for a given percentage increase"""
+    for bin_data in bins:
+        if bin_data["range_min"] <= pct_increase < bin_data["range_max"]:
+            logger.debug(f"Found bin for {pct_increase:.2f}%: {bin_data['range_min']:.1f}%-{bin_data['range_max']:.1f}%")
+            return bin_data
+    logger.debug(f"No bin found for {pct_increase:.2f}%")
+    return None
 
-async def cancel_bracket_orders_and_replace(api: AlpacaREST, symbol: str, child_orders: list, current_price: float):
-    """
-    Cancel the existing bracket order's child orders (stop-loss and take-profit)
-    and replace with a trailing stop order when target is hit.
-    """
-    try:
-        # Cancel all child orders from the original bracket
-        for child_order in child_orders:
-            try:
-                await asyncio.to_thread(api.cancel_order, child_order["id"])
-                logger.info(f"📤 Cancelled bracket child order: {child_order['id']} ({child_order['type']})")
-            except Exception as e:
-                logger.warning(f"⚠️ Could not cancel child order {child_order['id']}: {e}")
-        
-        # Small delay to ensure cancellations are processed
-        await asyncio.sleep(1)
-        
-        # Check current position to get exact quantity
-        current_position = await asyncio.to_thread(api.get_position, symbol)
-        position_qty = int(current_position.qty)
-        
-        if position_qty == 0:
-            logger.warning("⚠️ No position to create trailing stop for")
-            return None
-        
-        # Submit new trailing stop order
-        trailing_stop_order = await asyncio.to_thread(
-            api.submit_order,
-            symbol=symbol,
-            qty=position_qty,
-            side="sell",
-            type="trailing_stop",
-            trail_percent=TRAIL_PERCENT,
-            time_in_force="day"
-        )
-        
-        logger.info(f"📤 Alpaca trailing stop order submitted: {trailing_stop_order.id}")
-        logger.info(f"   Quantity: {position_qty}, Trail: {TRAIL_PERCENT*100:.2f}%")
-        return trailing_stop_order
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to cancel bracket orders and replace with trailing stop: {e}")
-        return None
+def calculate_position_size(total_cash: float, min_candidates: int) -> float:
+    """Calculate position size based on total cash and minimum candidates"""
+    position_size = (total_cash * (TOTAL_ACCOUNT_PCT / 100)) / min_candidates
+    logger.debug(f"Position size: ${position_size:.2f} (cash: ${total_cash:.2f}, factor: {TOTAL_ACCOUNT_PCT}%, candidates: {min_candidates})")
+    return position_size
 
-
-async def monitor_trade_ws(
-    api: AlpacaREST,
-    symbol: str,
-    qty: int,
-    entry_price: float,
-    finnhub_key: str,
-    apca_key: str,
-    apca_secret: str,
-    child_orders: list = None  # Add parameter for child orders from bracket
-):
-    """
-    Monitor the trade via BOTH Alpaca and Finnhub websockets with enhanced logging and order verification.
-    Now cancels bracket orders and replaces with trailing stop when target is hit.
-    """
-
-    cutoff = get_cutoff_time(datetime.now(TZ).date())
-    hit_target = False
-    peak = entry_price
-    tick_count = 0
-    last_log_time = time.monotonic()
-    alpaca_trailing_stop_order = None  # Track the trailing stop order
-    bracket_orders_cancelled = False  # Track if we've cancelled the original bracket orders
-
-    logger.info(f"🔍 Starting trade monitoring for {symbol}")
-    logger.info(f"Entry: ${entry_price:.2f}, Stop: ${entry_price * STOP_LOSS_FACTOR:.2f}, Target: ${entry_price * TARGET_FACTOR:.2f}")
-    logger.info(f"Monitor until: {cutoff.time()}")
+class TradeManager:
+    """Manages multiple trades simultaneously"""
     
-    if child_orders:
-        logger.info(f"Original bracket has {len(child_orders)} child orders to manage")
-
-    # shared price state
-    latest_price = {"value": entry_price}
-    price_lock = asyncio.Lock()
-
-    async def verify_and_handle_sell(reason: str, price: float):
-        pnl = (price - entry_price) / entry_price * 100
-        logger.info(f"{reason}: {symbol} @ ${price:.2f} (P&L: {pnl:+.2f}%)")
-
-        # CRITICAL FIX: Cancel any existing orders that might be holding shares
-        # This includes both the trailing stop AND the original bracket child orders
-        if alpaca_trailing_stop_order:
-            try:
-                await asyncio.to_thread(api.cancel_order, alpaca_trailing_stop_order.id)
-                logger.info("📤 Cancelled existing trailing stop order")
-            except Exception as e:
-                logger.warning(f"⚠️ Could not cancel trailing stop order: {e}")
+    def __init__(self, api: AlpacaREST, finnhub_key: str, apca_key: str, apca_secret: str):
+        self.api = api
+        self.finnhub_key = finnhub_key
+        self.apca_key = apca_key
+        self.apca_secret = apca_secret
+        self.active_trades = {}  # symbol -> trade_info
+        self.price_data = {}  # symbol -> latest_price
+        self.price_lock = asyncio.Lock()
+        self.cutoff_time = get_cutoff_time(datetime.now(TZ).date())
         
-        # Cancel original bracket child orders if they still exist and haven't been cancelled yet
-        if child_orders and not bracket_orders_cancelled:
-            for child_order in child_orders:
-                try:
-                    await asyncio.to_thread(api.cancel_order, child_order["id"])
-                    logger.info(f"📤 Cancelled bracket child order: {child_order['id']} ({child_order['type']})")
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not cancel child order {child_order['id']}: {e}")
-            # Small delay to ensure cancellations are processed
-            await asyncio.sleep(2)
+    async def add_trade(self, symbol: str, order_info: Dict, bin_data: Dict):
+        """Add a new trade to monitor"""
+        trade_info = {
+            'symbol': symbol,
+            'quantity': order_info['qty'],
+            'entry_price': order_info['filled_avg_price'],
+            'order_id': order_info['order_id'],
+            'child_orders': order_info.get('child_orders', []),
+            'bin_data': bin_data,
+            'target_hit': False,
+            'peak_price': order_info['filled_avg_price'],
+            'trailing_stop_active': False,
+            'alpaca_trailing_order': None
+        }
+        
+        async with self.price_lock:
+            self.active_trades[symbol] = trade_info
+            self.price_data[symbol] = order_info['filled_avg_price']
+        
+        logger.info(f"📊 Added trade to monitor: {symbol} @ ${trade_info['entry_price']:.2f}")
+        logger.info(f"   Stop loss: {bin_data['stop_loss']}%, Target: {bin_data['target_profit'] * TARGET_PROFIT_FACTOR:.1f}%")
 
-        # Initial position check before starting the sell loop
+    async def place_bracket_order(self, symbol: str, current_price: float, position_size: float, bin_data: Dict) -> Optional[Dict]:
+        """Place a bracket order with stop loss and take profit"""
         try:
-            current_position = await asyncio.to_thread(api.get_position, symbol)
-            remaining_qty = int(current_position.qty)
-            if remaining_qty <= 0:
-                logger.info("✅ No shares to sell - position already closed (likely by Alpaca's built-in orders)")
-                return
-            logger.info(f"📊 Current position: {remaining_qty} shares")
+            # Calculate quantity based on position size
+            qty = int(position_size / current_price)
+            if qty <= 0:
+                logger.error(f"❌ Invalid quantity for {symbol}: {qty}")
+                return None
+            
+            # Calculate stop loss and target prices
+            stop_loss_pct = bin_data['stop_loss'] / 100  # Convert to decimal
+            target_profit_pct = (bin_data['target_profit']) / 100  # Convert to decimal
+            
+            stop_loss_price = current_price * (1 + stop_loss_pct)  # stop_loss is negative, so this reduces price
+            target_price = current_price * (1 + (target_profit_pct * TARGET_PROFIT_FACTOR))
+            
+            logger.info(f"📊 Placing bracket order for {symbol}:")
+            logger.info(f"   Qty: {qty} @ ${current_price:.2f}")
+            logger.info(f"   Stop Loss: ${stop_loss_price:.2f} ({bin_data['stop_loss']}%)")
+            logger.info(f"   Target: ${target_price:.2f} ({bin_data['target_profit'] * TARGET_PROFIT_FACTOR:.1f}%)")
+            
+            order = await asyncio.to_thread(
+                self.api.submit_order,
+                symbol=symbol,
+                qty=qty,
+                side="buy",
+                type="market",
+                time_in_force="day",
+                order_class="bracket",
+                stop_loss={"stop_price": stop_loss_price},
+                take_profit={"limit_price": target_price}
+            )
+            
+            # Poll for fill
+            max_polls = 20
+            for poll in range(max_polls):
+                order_status = await asyncio.to_thread(self.api.get_order, order.id)
+                
+                if order_status.status == "filled":
+                    filled_price = float(order_status.filled_avg_price)
+                    filled_qty = int(order_status.filled_qty)
+                    
+                    # Get child orders
+                    child_orders = []
+                    await asyncio.sleep(1)  # Wait for child orders to be created
+                    try:
+                        all_orders = await asyncio.to_thread(self.api.list_orders, status="open", symbols=[symbol])
+                        for child_order in all_orders:
+                            if hasattr(child_order, 'parent_id') and child_order.parent_id == order.id:
+                                child_orders.append({
+                                    "id": child_order.id,
+                                    "type": child_order.order_type,
+                                    "side": child_order.side
+                                })
+                    except Exception as e:
+                        logger.warning(f"Could not retrieve child orders for {symbol}: {e}")
+                    
+                    logger.info(f"✅ {symbol} filled: {filled_qty} @ ${filled_price:.2f}")
+                    return {
+                        'symbol': symbol,
+                        'qty': filled_qty,
+                        'filled_avg_price': filled_price,
+                        'order_id': order.id,
+                        'child_orders': child_orders
+                    }
+                
+                elif order_status.status in ["rejected", "canceled"]:
+                    logger.error(f"❌ Order rejected for {symbol}: {order_status.status}")
+                    return None
+                
+                await asyncio.sleep(0.5)
+            
+            logger.error(f"❌ Order for {symbol} did not fill within timeout")
+            return None
+            
         except Exception as e:
-            logger.info(f"✅ No position found - likely already closed by Alpaca's built-in orders: {e}")
+            logger.error(f"❌ Failed to place bracket order for {symbol}: {e}")
+            return None
+
+    async def monitor_all_trades(self):
+        """Monitor all active trades with websockets"""
+        if not self.active_trades:
+            logger.info("No trades to monitor")
             return
+        
+        symbols = list(self.active_trades.keys())
+        logger.info(f"🔍 Starting monitoring for {len(symbols)} trades: {symbols}")
+        
+        # Start websocket tasks
+        finnhub_task = asyncio.create_task(self._finnhub_websocket(symbols))
+        alpaca_task = asyncio.create_task(self._alpaca_websocket(symbols))
+        monitor_task = asyncio.create_task(self._trade_logic_monitor())
+        
+        try:
+            await asyncio.gather(finnhub_task, alpaca_task, monitor_task, return_exceptions=True)
+        finally:
+            # Cleanup
+            for task in [finnhub_task, alpaca_task, monitor_task]:
+                if not task.done():
+                    task.cancel()
+            logger.info("✅ Trade monitoring completed")
 
-        max_retries = 100
+    async def _finnhub_websocket(self, symbols: List[str]):
+        """Finnhub websocket for price updates"""
+        uri = f"wss://ws.finnhub.io?token={self.finnhub_key}"
+        connection_attempts = 0
+        max_attempts = 3
+
+        while connection_attempts < max_attempts and self.active_trades:
+            try:
+                async with websockets.connect(uri, ping_interval=20, ping_timeout=10) as ws:
+                    # Subscribe to all symbols
+                    for symbol in symbols:
+                        if symbol in self.active_trades:  # Check if still active
+                            subscribe_msg = json.dumps({"type": "subscribe", "symbol": symbol})
+                            await ws.send(subscribe_msg)
+                            await asyncio.sleep(0.1)  # Rate limiting
+                    
+                    logger.info(f"📡 Finnhub websocket monitoring: {symbols}")
+                    connection_attempts = 0
+                    
+                    async for raw in ws:
+                        if not self.active_trades:  # Exit if no active trades
+                            break
+                            
+                        data = json.loads(raw)
+                        if data.get("type") == "trade":
+                            for trade in data.get("data", []):
+                                symbol = trade.get("s")
+                                price = trade.get("p")
+                                if symbol and price and symbol in self.active_trades:
+                                    async with self.price_lock:
+                                        self.price_data[symbol] = price
+                                        
+            except Exception as e:
+                connection_attempts += 1
+                logger.warning(f"Finnhub websocket error (attempt {connection_attempts}): {e}")
+                if connection_attempts < max_attempts:
+                    await asyncio.sleep(5)
+
+    async def _alpaca_websocket(self, symbols: List[str]):
+        """Alpaca websocket for price updates"""
+        uri = ALPACA_WS_URL
+        connection_attempts = 0
+        max_attempts = 3
+
+        while connection_attempts < max_attempts and self.active_trades:
+            try:
+                async with websockets.connect(uri, ping_interval=20, ping_timeout=10) as ws:
+                    # Authenticate
+                    auth_msg = json.dumps({
+                        "action": "auth",
+                        "key": self.apca_key,
+                        "secret": self.apca_secret
+                    })
+                    await ws.send(auth_msg)
+                    
+                    # Wait for auth response
+                    auth_resp = await ws.recv()
+                    auth_data = json.loads(auth_resp)
+                    
+                    # Handle different auth response formats
+                    if auth_data[0].get("msg") == "connected":
+                        auth_resp2 = await ws.recv()
+                        auth_data2 = json.loads(auth_resp2)
+                        if auth_data2[0].get("msg") != "authenticated":
+                            raise RuntimeError("Alpaca auth failed")
+                    elif auth_data[0].get("msg") != "authenticated":
+                        raise RuntimeError("Alpaca auth failed")
+                    
+                    # Subscribe to symbols in chunks
+                    chunk_size = min(30, len(symbols))
+                    for i in range(0, len(symbols), chunk_size):
+                        chunk = symbols[i:i + chunk_size]
+                        active_chunk = [s for s in chunk if s in self.active_trades]
+                        
+                        if active_chunk:
+                            subscribe_msg = json.dumps({
+                                "action": "subscribe",
+                                "trades": active_chunk
+                            })
+                            await ws.send(subscribe_msg)
+                    
+                    logger.info(f"📡 Alpaca websocket monitoring: {symbols}")
+                    connection_attempts = 0
+                    
+                    async for raw in ws:
+                        if not self.active_trades:
+                            break
+                            
+                        data = json.loads(raw)
+                        for msg in data:
+                            if msg.get("T") == "t":  # Trade
+                                symbol = msg.get("S")
+                                price = msg.get("p")
+                                if symbol and price and symbol in self.active_trades:
+                                    async with self.price_lock:
+                                        self.price_data[symbol] = price
+                                        
+            except Exception as e:
+                connection_attempts += 1
+                logger.warning(f"Alpaca websocket error (attempt {connection_attempts}): {e}")
+                if connection_attempts < max_attempts:
+                    await asyncio.sleep(5)
+
+    async def _trade_logic_monitor(self):
+        """Monitor trade logic for all positions"""
+        last_log_time = time.monotonic()
+        log_interval = 30  # seconds
+        
+        while self.active_trades:
+            now = datetime.now(TZ)
+            
+            # Check cutoff time
+            if now >= self.cutoff_time:
+                logger.info("⏰ Cutoff time reached - closing all positions")
+                await self._close_all_positions("TIME_EXIT")
+                break
+            
+            # Process each active trade
+            trades_to_remove = []
+            
+            async with self.price_lock:
+                current_trades = dict(self.active_trades)
+                current_prices = dict(self.price_data)
+            
+            for symbol, trade_info in current_trades.items():
+                if symbol not in current_prices:
+                    continue
+                    
+                current_price = current_prices[symbol]
+                entry_price = trade_info['entry_price']
+                bin_data = trade_info['bin_data']
+                
+                # Calculate current P&L
+                pnl_pct = (current_price - entry_price) / entry_price * 100
+                
+                # Check stop loss
+                stop_loss_pct = bin_data['stop_loss']
+                if pnl_pct <= stop_loss_pct:
+                    logger.info(f"🛑 Stop loss triggered for {symbol}: {pnl_pct:.2f}% <= {stop_loss_pct:.2f}%")
+                    success = await self._handle_stop_loss(symbol, trade_info)
+                    if success:
+                        trades_to_remove.append(symbol)
+                    continue
+                
+                # Check target profit
+                target_pct = bin_data['target_profit'] 
+                if not trade_info['target_hit'] and pnl_pct >= target_pct:
+                    logger.info(f"🎯 Target hit for {symbol}: {pnl_pct:.2f}% >= {target_pct:.2f}%")
+                    await self._handle_target_hit(symbol, trade_info, current_price)
+                    async with self.price_lock:
+                        self.active_trades[symbol]['target_hit'] = True
+                        self.active_trades[symbol]['peak_price'] = current_price
+                
+                # Handle trailing stop logic
+                elif trade_info['target_hit']:
+                    await self._handle_trailing_stop(symbol, trade_info, current_price)
+            
+            # Remove completed trades
+            for symbol in trades_to_remove:
+                async with self.price_lock:
+                    self.active_trades.pop(symbol, None)
+                    self.price_data.pop(symbol, None)
+            
+            # Periodic logging
+            current_time = time.monotonic()
+            if current_time - last_log_time > log_interval:
+                await self._log_trade_status()
+                last_log_time = current_time
+            
+            await asyncio.sleep(0.1)  # 100ms monitoring loop
+
+    async def _handle_stop_loss(self, symbol: str, trade_info: Dict) -> bool:
+        """Handle stop loss trigger with double-check mechanism and retry logic"""
+        try:
+            # First check if bracket order stop loss was executed
+            await asyncio.sleep(1)
+            
+            try:
+                position = await asyncio.to_thread(self.api.get_position, symbol)
+                current_qty = int(position.qty)
+                
+                if current_qty > 0:
+                    logger.warning(f"⚠️ Bracket stop loss failed for {symbol} - executing manual sell of {current_qty} shares")
+                    
+                    # Cancel remaining child orders
+                    for child_order in trade_info['child_orders']:
+                        try:
+                            await asyncio.to_thread(self.api.cancel_order, child_order['id'])
+                        except Exception as e:
+                            logger.debug(f"Could not cancel child order {child_order['id']}: {e}")
+                    
+                    # Execute market sell with retry logic for partial fills
+                    await self._execute_sell_with_retry(symbol, "STOP_LOSS")
+                else:
+                    logger.info(f"✅ Bracket stop loss worked for {symbol}")
+                    
+            except Exception as e:
+                if "position does not exist" in str(e).lower():
+                    logger.info(f"✅ Position already closed for {symbol}")
+                else:
+                    logger.error(f"❌ Error checking position for {symbol}: {e}")
+                    
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to handle stop loss for {symbol}: {e}")
+            return False
+
+    async def _execute_sell_with_retry(self, symbol: str, reason: str, max_retries: int = 100):
+        """Execute sell with comprehensive retry logic for partial fills"""
+        entry_price = self.active_trades[symbol]['entry_price']
+        current_price = self.price_data.get(symbol, entry_price)
+        pnl = (current_price - entry_price) / entry_price * 100
+        
+        logger.info(f"{reason}: {symbol} @ ${current_price:.2f} (P&L: {pnl:+.2f}%)")
+        
         attempt = 0
-
         while attempt <= max_retries:
             try:
                 # 🛡️ Always refresh current position before selling
                 try:
-                    current_position = await asyncio.to_thread(api.get_position, symbol)
+                    current_position = await asyncio.to_thread(self.api.get_position, symbol)
                     remaining_qty = int(current_position.qty)
                     if remaining_qty <= 0:
                         logger.info(f"✅ No shares left to sell on attempt #{attempt + 1}")
                         break
-                    logger.info(f"📊 Refreshed position before attempt #{attempt + 1}: {remaining_qty} shares")
+                    logger.debug(f"📊 Position check before attempt #{attempt + 1}: {remaining_qty} shares")
                 except Exception as e:
-                    logger.info(f"✅ No position found on attempt #{attempt + 1}: {e}")
-                    break
+                    if "position does not exist" in str(e).lower():
+                        logger.info(f"✅ No position found on attempt #{attempt + 1}: position already closed")
+                        break
+                    else:
+                        logger.warning(f"⚠️ Could not verify position on attempt #{attempt + 1}: {e}")
+                        # Continue with last known quantity as fallback
+                        remaining_qty = self.active_trades[symbol]['quantity']
 
                 # 🛑 Hard stop check
                 if remaining_qty <= 0:
                     logger.info(f"🛑 Skipping sell attempt — no shares left to sell (qty={remaining_qty})")
                     break
 
-                # Submit the sell order for remaining shares
+                # Submit the sell order for actual remaining shares
                 sell_order = await asyncio.to_thread(
-                    api.submit_order,
+                    self.api.submit_order,
                     symbol=symbol,
                     qty=remaining_qty,
                     side="sell",
                     type="market",
                     time_in_force="day"
                 )
-                logger.info(f"📤 Sell order attempt #{attempt + 1}: Submitted {remaining_qty}")
+                logger.info(f"📤 Sell order attempt #{attempt + 1}: Submitted {remaining_qty} shares")
 
-                await asyncio.sleep(2)  # allow time for order to partially/fully fill
+                # Poll for fill with partial fill tracking
+                max_polls = 20
+                total_sold = 0
+                
+                for poll in range(max_polls):
+                    await asyncio.sleep(0.5)
+                    fetched_order = await asyncio.to_thread(self.api.get_order, sell_order.id)
+                    filled_qty = int(fetched_order.filled_qty or 0)
+                    
+                    if filled_qty > total_sold:
+                        new_fill = filled_qty - total_sold
+                        total_sold = filled_qty
+                        avg_price = float(fetched_order.filled_avg_price or current_price)
+                        logger.info(f"✅ Partial sell fill: {new_fill} shares @ ${avg_price:.2f} (total sold: {total_sold}/{remaining_qty})")
+                    
+                    if fetched_order.status == "filled":
+                        logger.info(f"✅ Sell order completely filled: {total_sold} shares")
+                        break
+                    elif fetched_order.status in ["rejected", "canceled", "expired"]:
+                        if total_sold > 0:
+                            logger.warning(f"⚠️ Sell order {fetched_order.status} after selling {total_sold}/{remaining_qty} shares")
+                        else:
+                            logger.warning(f"⚠️ Sell order {fetched_order.status} - no shares sold")
+                        break
 
-                # Retrieve actual filled amount
-                fetched_order = await asyncio.to_thread(api.get_order, sell_order.id)
-                filled_qty = int(fetched_order.filled_qty or 0)
-                logger.info(f"✅ Order filled {filled_qty} / {remaining_qty} on attempt #{attempt + 1}")
-
-                # Subtract filled qty from remaining
-                remaining_qty -= filled_qty
-
-                # If anything remains, confirm via position lookup
-                if remaining_qty > 0:
-                    try:
-                        final_position = await asyncio.to_thread(api.get_position, symbol)
-                        current_pos = int(final_position.qty)
-                        logger.warning(f"⚠️ Still holding {current_pos} shares after attempt #{attempt + 1}")
-                        remaining_qty = current_pos  # sync with actual position in case of discrepancy
-                    except Exception as e:
-                        logger.warning(f"Could not verify position on attempt #{attempt + 1}: {e}")
-                else:
-                    logger.info(f"✅ POSITION FULLY CLOSED on attempt #{attempt + 1}")
-                    break
+                # Update our tracking based on what actually sold
+                if total_sold > 0:
+                    async with self.price_lock:
+                        self.active_trades[symbol]['quantity'] -= total_sold
+                        logger.info(f"📊 Updated position: {self.active_trades[symbol]['quantity']} shares remaining")
+                    
+                    # If we sold everything, we're done
+                    if self.active_trades[symbol]['quantity'] <= 0:
+                        logger.info(f"✅ POSITION FULLY CLOSED for {symbol} on attempt #{attempt + 1}")
+                        break
 
             except Exception as e:
                 logger.error(f"❌ Sell order failed on attempt #{attempt + 1}: {e}")
 
                 if "position does not exist" in str(e).lower() or "insufficient shares" in str(e).lower():
-                    logger.info(f"✅ Position appears to be already closed based on error: {e}")
+                    logger.info(f"✅ Position appears to be already closed: {e}")
                     break
 
             attempt += 1
 
-        if remaining_qty > 0:
-            logger.critical(f"🚨 UNABLE TO FULLY EXIT POSITION: {remaining_qty} shares remaining after {max_retries} retries")
+        # Final position verification
+        try:
+            final_position = await asyncio.to_thread(self.api.get_position, symbol)
+            final_qty = int(final_position.qty)
+            if final_qty > 0:
+                logger.critical(f"🚨 UNABLE TO FULLY EXIT POSITION: {final_qty} shares remaining after {max_retries} retries")
+            else:
+                logger.info(f"✅ Position verification: {symbol} fully closed")
+        except Exception as e:
+            if "position does not exist" in str(e).lower():
+                logger.info(f"✅ Final verification: {symbol} position successfully closed")
+            else:
+                logger.warning(f"⚠️ Could not verify final position for {symbol}: {e}")
 
+    async def _handle_target_hit(self, symbol: str, trade_info: Dict, current_price: float):
+        """Handle target hit - cancel bracket and prepare for trailing stop"""
+        try:
+            # Cancel bracket child orders
+            for child_order in trade_info['child_orders']:
+                try:
+                    await asyncio.to_thread(self.api.cancel_order, child_order['id'])
+                    logger.info(f"📤 Cancelled bracket child order for {symbol}: {child_order['id']}")
+                except Exception as e:
+                    logger.debug(f"Could not cancel child order {child_order['id']}: {e}")
+            
+            # Could optionally place Alpaca trailing stop here, but we'll use websocket trailing
+            logger.info(f"🎯 {symbol} target hit - now using websocket trailing stop at {TRAIL_PERCENT*100:.1f}%")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to handle target hit for {symbol}: {e}")
 
-    async def monitor_trailing_stop_order():
-        """Monitor the trailing stop order status"""
-        if not alpaca_trailing_stop_order:
+    async def _handle_trailing_stop(self, symbol: str, trade_info: Dict, current_price: float):
+        """Handle trailing stop logic with robust position verification"""
+        peak_price = trade_info['peak_price']
+        
+        # Update peak if price went higher
+        if current_price > peak_price:
+            async with self.price_lock:
+                self.active_trades[symbol]['peak_price'] = current_price
+            return
+        
+        # Check for trailing stop trigger
+        decline_pct = (peak_price - current_price) / peak_price
+        if decline_pct >= TRAIL_PERCENT:
+            pnl_pct = (current_price - trade_info['entry_price']) / trade_info['entry_price'] * 100
+            logger.info(f"📉 Trailing stop triggered for {symbol}: {decline_pct*100:.2f}% decline from peak ${peak_price:.2f} (P&L: {pnl_pct:+.2f}%)")
+            
+            # Execute trailing stop sell with retry logic
+            await self._execute_sell_with_retry(symbol, "TRAILING_STOP")
+            
+            # Remove from active trades after sell attempt
+            async with self.price_lock:
+                self.active_trades.pop(symbol, None)
+                self.price_data.pop(symbol, None)
+
+    async def _close_all_positions(self, reason: str):
+        """Close all remaining positions with robust retry logic"""
+        logger.info(f"🔄 Closing all positions due to: {reason}")
+        
+        symbols_to_close = list(self.active_trades.keys())
+        close_tasks = []
+        
+        for symbol in symbols_to_close:
+            try:
+                # Check if we actually have a position
+                position = await asyncio.to_thread(self.api.get_position, symbol)
+                current_qty = int(position.qty)
+                
+                if current_qty > 0:
+                    # Cancel any existing orders first
+                    trade_info = self.active_trades[symbol]
+                    for child_order in trade_info.get('child_orders', []):
+                        try:
+                            await asyncio.to_thread(self.api.cancel_order, child_order['id'])
+                            logger.debug(f"Cancelled order {child_order['id']} for {symbol}")
+                        except Exception as e:
+                            logger.debug(f"Could not cancel order {child_order['id']}: {e}")
+                    
+                    # Create sell task for this symbol
+                    task = asyncio.create_task(self._execute_sell_with_retry(symbol, reason, max_retries=50))
+                    close_tasks.append(task)
+                    
+            except Exception as e:
+                if "position does not exist" in str(e).lower():
+                    logger.debug(f"No position for {symbol}")
+                else:
+                    logger.error(f"❌ Error checking position for {symbol}: {e}")
+        
+        # Execute all sell orders concurrently
+        if close_tasks:
+            logger.info(f"📤 Executing {len(close_tasks)} concurrent sell orders...")
+            await asyncio.gather(*close_tasks, return_exceptions=True)
+        
+        # Clear all active trades
+        async with self.price_lock:
+            self.active_trades.clear()
+            self.price_data.clear()
+            
+        logger.info(f"✅ All position closure attempts completed for {reason}")
+
+    async def _log_trade_status(self):
+        """Log current status of all trades"""
+        if not self.active_trades:
             return
             
-        try:
-            order_status = await asyncio.to_thread(api.get_order, alpaca_trailing_stop_order.id)
-            
-            if order_status.status == "filled":
-                filled_price = float(order_status.filled_avg_price or 0)
-                pnl = (filled_price - entry_price) / entry_price * 100
-                logger.info(f"✅ Alpaca trailing stop FILLED: {symbol} @ ${filled_price:.2f} (P&L: {pnl:+.2f}%)")
-                return True  # Position closed by Alpaca
-            elif order_status.status in ["canceled", "rejected", "expired"]:
-                logger.warning(f"⚠️ Alpaca trailing stop order {order_status.status}")
-                return False  # Order failed, continue with websocket monitoring
+        logger.info(f"📊 Trade Status Update ({len(self.active_trades)} active trades):")
+        
+        async with self.price_lock:
+            for symbol, trade_info in self.active_trades.items():
+                current_price = self.price_data.get(symbol, trade_info['entry_price'])
+                entry_price = trade_info['entry_price']
+                pnl_pct = (current_price - entry_price) / entry_price * 100
                 
-        except Exception as e:
-            logger.warning(f"⚠️ Could not check trailing stop order status: {e}")
-            
-        return False  # Continue monitoring
+                status = "🎯 TRAILING" if trade_info['target_hit'] else "📈 MONITORING"
+                peak_info = f" (peak: ${trade_info['peak_price']:.2f})" if trade_info['target_hit'] else ""
+                
+                logger.info(f"   {status} {symbol}: ${current_price:.2f} | P&L: {pnl_pct:+.2f}%{peak_info}")
 
-    async def finnhub_ws():
+
+# ─── NEW MAIN TRADING FUNCTIONS ──────────────────────────────────────────────
+
+async def find_opening_prices_and_trade(
+    symbols: List[str],
+    prev_close: Dict[str, float],
+    bins_data: Dict,
+    api: AlpacaREST,
+    finnhub_key: str,
+    apca_key: str,
+    apca_secret: str,
+    position_size: float
+):
+    """Find opening prices and immediately place trades for viable candidates"""
+    
+    logger.info("Waiting for market to open...")
+    sleep_until_market_open(api)
+    time.sleep(1)
+    logger.info(f"Market open - monitoring {len(symbols)} symbols for trading opportunities")
+    
+    # Calculate cutoff time (9:31:30 America/New_York for tighter window)
+    now = datetime.now(TZ)
+    cutoff_time = now.replace(hour=9, minute=31, second=30, microsecond=0)
+    
+    if now > cutoff_time:
+        logger.error(f"❌ Already past cutoff time of 9:31:30 - exiting")
+        raise RuntimeError("Already past cutoff time")
+    
+    # Shared state for price monitoring
+    price_results = {}
+    pending_symbols = set(symbols)
+    results_lock = asyncio.Lock()
+    cutoff_reached = asyncio.Event()
+    
+    # Initialize trade manager
+    trade_manager = TradeManager(api, finnhub_key, apca_key, apca_secret)
+    
+    # Track trades placed
+    trades_placed = 0
+    bins = bins_data['bins']
+    
+    async def cutoff_monitor():
+        """Monitor cutoff time"""
+        while True:
+            if datetime.now(TZ) >= cutoff_time:
+                logger.info(f"⏰ Cutoff time {cutoff_time.time()} reached")
+                cutoff_reached.set()
+                break
+            await asyncio.sleep(0.1)
+    
+    async def process_trade_opportunity(symbol: str, price: float, pct_increase: float):
+        """Process a potential trade opportunity"""
+        nonlocal trades_placed
+        
+        # Find appropriate bin
+        bin_data = find_bin_for_percentage(pct_increase, bins)
+        if not bin_data:
+            logger.debug(f"❌ No bin found for {symbol} at {pct_increase:.2f}%")
+            return
+        
+        logger.info(f"🔥 TRADE OPPORTUNITY: {symbol} @ ${price:.2f} ({pct_increase:.2f}%) - matches bin range")
+        
+        # Place bracket order immediately
+        order_result = await trade_manager.place_bracket_order(symbol, price, position_size, bin_data)
+        
+        if order_result:
+            await trade_manager.add_trade(symbol, order_result, bin_data)
+            trades_placed += 1
+            logger.info(f"✅ Trade #{trades_placed} placed: {symbol}")
+        else:
+            logger.error(f"❌ Failed to place trade for {symbol}")
+    
+    async def finnhub_price_monitor():
+        """Monitor prices via Finnhub WebSocket"""
         uri = f"wss://ws.finnhub.io?token={finnhub_key}"
         attempt = 0
-        max_attempts = 5
-
-        while attempt < max_attempts:
+        max_attempts = 3
+        
+        while attempt < max_attempts and not cutoff_reached.is_set():
             try:
-                async with websockets.connect(uri) as ws:
-                    await ws.send(json.dumps({"type": "subscribe", "symbol": symbol}))
-                    logger.debug("Finnhub WS subscribed")
+                async with websockets.connect(uri, ping_interval=20, ping_timeout=10) as ws:
+                    # Subscribe to all symbols
+                    for symbol in symbols:
+                        subscribe_msg = json.dumps({"type": "subscribe", "symbol": symbol})
+                        await ws.send(subscribe_msg)
+                        await asyncio.sleep(0.05)  # Rate limiting
+                    
+                    logger.info("📡 Finnhub price monitoring active")
                     attempt = 0
-
-                    async for raw in ws:
-                        data = json.loads(raw)
-                        if data.get("type") != "trade":
+                    
+                    while not cutoff_reached.is_set():
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                            data = json.loads(raw)
+                            
+                            if data.get("type") == "trade":
+                                for trade in data.get("data", []):
+                                    symbol = trade.get("s")
+                                    price = trade.get("p")
+                                    
+                                    if symbol and price and symbol in pending_symbols:
+                                        if symbol in prev_close:
+                                            pct_increase = (price - prev_close[symbol]) / prev_close[symbol] * 100
+                                            
+                                            async with results_lock:
+                                                if symbol in pending_symbols:
+                                                    pending_symbols.remove(symbol)
+                                                    price_results[symbol] = {
+                                                        'price': price,
+                                                        'pct_increase': pct_increase,
+                                                        'source': 'finnhub'
+                                                    }
+                                            
+                                            # Process trade opportunity immediately
+                                            await process_trade_opportunity(symbol, price, pct_increase)
+                                        
+                        except asyncio.TimeoutError:
                             continue
-                        price = data["data"][-1]["p"]
-                        async with price_lock:
-                            latest_price["value"] = price
-                        logger.debug(f"Finnhub tick: {symbol} @ {price:.2f}")
+                        except Exception as e:
+                            logger.debug(f"Finnhub WS processing error: {e}")
+                            
             except Exception as e:
                 attempt += 1
-                if attempt < max_attempts:
-                    logger.warning(f"Finnhub WS error {e}, reconnecting...")
-                    await asyncio.sleep(5)
-                else:
-                    logger.error("Finnhub WS max attempts reached")
-                    break
-
-    async def alpaca_ws():
-        uri = "wss://stream.data.alpaca.markets/v2/iex"
+                logger.warning(f"Finnhub WS error (attempt {attempt}): {e}")
+                if attempt < max_attempts and not cutoff_reached.is_set():
+                    await asyncio.sleep(2)
+    
+    async def alpaca_price_monitor():
+        """Monitor prices via Alpaca WebSocket"""
+        uri = ALPACA_WS_URL
         attempt = 0
-        max_attempts = 5
-
-        while attempt < max_attempts:
+        max_attempts = 3
+        
+        while attempt < max_attempts and not cutoff_reached.is_set():
             try:
-                async with websockets.connect(uri) as ws:
+                async with websockets.connect(uri, ping_interval=20, ping_timeout=10) as ws:
+                    # Authenticate
                     auth_msg = json.dumps({
                         "action": "auth",
                         "key": apca_key,
                         "secret": apca_secret
                     })
                     await ws.send(auth_msg)
+                    
+                    # Handle auth response
                     auth_resp = json.loads(await ws.recv())
-                    if auth_resp[0].get("msg") != "authenticated":
-                        logger.error("Alpaca WS auth failed")
-                        return
-
-                    await ws.send(json.dumps({
-                        "action": "subscribe",
-                        "trades": [symbol]
-                    }))
-                    logger.debug("Alpaca WS subscribed")
-
+                    if auth_resp[0].get("msg") == "connected":
+                        auth_resp2 = json.loads(await ws.recv())
+                        if auth_resp2[0].get("msg") != "authenticated":
+                            raise RuntimeError("Alpaca auth failed")
+                    elif auth_resp[0].get("msg") != "authenticated":
+                        raise RuntimeError("Alpaca auth failed")
+                    
+                    # Subscribe in chunks
+                    chunk_size = 30
+                    for i in range(0, len(symbols), chunk_size):
+                        chunk = symbols[i:i + chunk_size]
+                        subscribe_msg = json.dumps({
+                            "action": "subscribe",
+                            "trades": chunk
+                        })
+                        await ws.send(subscribe_msg)
+                    
+                    logger.info("📡 Alpaca price monitoring active")
                     attempt = 0
-
-                    async for raw in ws:
-                        data = json.loads(raw)
-                        for msg in data:
-                            if msg.get("T") == "t":
-                                price = msg["p"]
-                                async with price_lock:
-                                    latest_price["value"] = price
-                                logger.debug(f"Alpaca tick: {symbol} @ {price:.2f}")
+                    
+                    while not cutoff_reached.is_set():
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                            data = json.loads(raw)
+                            
+                            for msg in data:
+                                if msg.get("T") == "t":  # Trade
+                                    symbol = msg.get("S")
+                                    price = msg.get("p")
+                                    
+                                    if symbol and price and symbol in pending_symbols:
+                                        if symbol in prev_close:
+                                            pct_increase = (price - prev_close[symbol]) / prev_close[symbol] * 100
+                                            
+                                            async with results_lock:
+                                                if symbol in pending_symbols:
+                                                    pending_symbols.remove(symbol)
+                                                    price_results[symbol] = {
+                                                        'price': price,
+                                                        'pct_increase': pct_increase,
+                                                        'source': 'alpaca'
+                                                    }
+                                            
+                                            # Process trade opportunity immediately
+                                            await process_trade_opportunity(symbol, price, pct_increase)
+                                            
+                        except asyncio.TimeoutError:
+                            continue
+                        except Exception as e:
+                            logger.debug(f"Alpaca WS processing error: {e}")
+                            
             except Exception as e:
                 attempt += 1
-                if attempt < max_attempts:
-                    logger.warning(f"Alpaca WS error {e}, reconnecting...")
-                    await asyncio.sleep(5)
-                else:
-                    logger.error("Alpaca WS max attempts reached")
-                    break
-
-    # launch both websocket tasks
-    fh_task = asyncio.create_task(finnhub_ws())
-    alpaca_task = asyncio.create_task(alpaca_ws())
-
+                logger.warning(f"Alpaca WS error (attempt {attempt}): {e}")
+                if attempt < max_attempts and not cutoff_reached.is_set():
+                    await asyncio.sleep(2)
+    
+    # Start all monitoring tasks
+    cutoff_task = asyncio.create_task(cutoff_monitor())
+    finnhub_task = asyncio.create_task(finnhub_price_monitor())
+    alpaca_task = asyncio.create_task(alpaca_price_monitor())
+    
     try:
-        while True:
-            await asyncio.sleep(0.1)
-            async with price_lock:
-                price = latest_price["value"]
-            now = datetime.now(TZ)
-            tick_count += 1
-
-            # Check if trailing stop order was filled (if it exists)
-            if alpaca_trailing_stop_order:
-                order_filled = await monitor_trailing_stop_order()
-                if order_filled:
-                    logger.info("✅ Position closed by Alpaca trailing stop - exiting monitor")
-                    break
-
-            """# periodic logging
-            current_time = time.monotonic()
-            if tick_count % 100 == 0 or (current_time - last_log_time) > 60:
-                pnl = (price - entry_price) / entry_price * 100
-                logger.info(f"📊 {symbol} @ ${price:.2f} (P&L: {pnl:+.2f}%) [tick #{tick_count}]")
-                last_log_time = current_time
-                """
-            # exit conditions
-            if not hit_target and now >= cutoff:
-                await verify_and_handle_sell("⏰ TIME EXIT", price)
-                break
-            if price <= entry_price * STOP_LOSS_FACTOR:
-                await verify_and_handle_sell("🛑 STOP LOSS", price)
-                break
-            if not hit_target and price >= entry_price * TARGET_FACTOR:
-                hit_target = True
-                peak = price
-                pnl = (price - entry_price) / entry_price * 100
-                logger.info(f"🎯 TARGET HIT: {symbol} @ ${price:.2f} (P&L: {pnl:+.2f}%) - Replacing bracket with trailing stop...")
-                
-                # Cancel bracket orders and replace with trailing stop
-                if child_orders and not bracket_orders_cancelled:
-                    alpaca_trailing_stop_order = await cancel_bracket_orders_and_replace(
-                        api, symbol, child_orders, price
-                    )
-                    bracket_orders_cancelled = True
-                    
-                    if alpaca_trailing_stop_order:
-                        logger.info("✅ Alpaca trailing stop order active - websocket monitoring as backup")
-                    else:
-                        logger.warning("⚠️ Alpaca trailing stop failed - relying on websocket monitoring")
-                else:
-                    logger.warning("⚠️ No child orders to cancel - using websocket-only trailing stop")
-                
-            if hit_target:
-                if price > peak:
-                    old_peak = peak
-                    peak = price
-                    logger.debug(f"New peak for {symbol}: ${old_peak:.2f} → ${peak:.2f}")
-                elif price < peak:
-                    decline = (peak - price) / peak * 100
-                    logger.debug(f"📉 Price decline detected ({decline:.2f}%)")
-                    
-                    # Always trigger websocket sell on decline - it will handle both scenarios:
-                    # 1. If Alpaca trailing stop already filled, verify_and_handle_sell will find no position
-                    # 2. If Alpaca trailing stop failed/slow, verify_and_handle_sell will close the position
-                    await verify_and_handle_sell("📉 TRAILING STOP", price)
-                    break
-                        
-    finally:
-        # Cancel any remaining trailing stop order
-        if alpaca_trailing_stop_order:
-            try:
-                await asyncio.to_thread(api.cancel_order, alpaca_trailing_stop_order.id)
-                logger.info("📤 Cancelled trailing stop order on exit")
-            except Exception as e:
-                logger.warning(f"⚠️ Could not cancel trailing stop order on exit: {e}")
+        # Wait for cutoff time
+        await cutoff_reached.wait()
+        logger.info(f"🛑 Price discovery phase complete - {trades_placed} trades placed")
         
-        fh_task.cancel()
-        alpaca_task.cancel()
-        await asyncio.gather(fh_task, alpaca_task, return_exceptions=True)
-
-    logger.info(f"✅ Trade monitoring completed for {symbol}")
+    finally:
+        # Cancel monitoring tasks
+        for task in [cutoff_task, finnhub_task, alpaca_task]:
+            if not task.done():
+                task.cancel()
+        
+        await asyncio.gather(cutoff_task, finnhub_task, alpaca_task, return_exceptions=True)
+    
+    # Now monitor all placed trades
+    if trade_manager.active_trades:
+        logger.info(f"🔍 Starting trade monitoring for {len(trade_manager.active_trades)} positions")
+        await trade_manager.monitor_all_trades()
+    else:
+        logger.info("No trades were placed - session complete")
 
 
 def main():
-    logger.info("🚀 Starting Enhanced Earnings Trading Bot")
+    logger.info("🚀 Starting Enhanced JSON-Driven Earnings Trading Bot")
 
     if not all([FINNHUB_API_KEY, APCA_KEY, APCA_SECRET]):
         logger.error("❌ Missing required API keys - check environment variables")
@@ -1339,12 +1143,21 @@ def main():
         logger.error(f"❌ Failed to initialize API clients: {e}")
         sys.exit(1)
 
+    # Load earnings bins configuration
+    try:
+        bins_data = load_earnings_bins("earnings_bins.json")
+        min_candidates = bins_data['metadata']['minimum_candidates_analysis']['recommended_minimum']
+        logger.info(f"✅ Loaded trading configuration - minimum candidates: {min_candidates}")
+    except Exception as e:
+        logger.error(f"❌ Failed to load earnings bins configuration: {e}")
+        sys.exit(1)
+
     today = datetime.now(TZ).date()
     prev_day = get_prev_business_day(today)
     start, end = prev_day.isoformat(), today.isoformat()
     logger.info(f"📅 Trading session: {start} → {end}")
 
-    # Fetch and filter earnings data
+    # Fetch and filter earnings data (using existing functions - DO NOT CHANGE)
     entries = fetch_earnings_calendar(fh, start, end)
     if not entries:
         logger.error("❌ No earnings entries found - exiting")
@@ -1357,52 +1170,58 @@ def main():
 
     candidates = group_candidates_by_surprise(candidates)
 
-    # Load previous closes
+    # Check minimum candidates requirement
+    if len(candidates) < min_candidates:
+        logger.error(f"❌ Only {len(candidates)} candidates found, minimum required: {min_candidates}")
+        logger.error("Not performing any trades due to insufficient candidates")
+        sys.exit(0)  # Exit successfully but don't trade
+
+    logger.info(f"✅ {len(candidates)} candidates meet minimum requirement of {min_candidates}")
+
+    # Load previous closes (using existing function - DO NOT CHANGE)
     prev_close = preload_prev_closes(alp, candidates, start)
     if not prev_close:
         logger.error("❌ No previous closes loaded - exiting")
         sys.exit(1)
 
-    # Check market status before proceeding
-    clock = alp.get_clock()
-
-    # Get opening prices using new dual-source approach
-    symbols = [c["symbol"] for c in candidates]
-    logger.info("🔌 Starting dual-source price monitoring (Finnhub + Alpaca WS)...")
-
+    # Calculate position sizing
     try:
-        best_candidate = asyncio.run(get_opening_prices_with_window(
+        account = alp.get_account()
+        total_cash = float(account.cash)
+        position_size = calculate_position_size(total_cash, min_candidates)
+        
+        logger.info(f"💰 Account cash: ${total_cash:.2f}")
+        logger.info(f"📊 Position size per trade: ${position_size:.2f}")
+        logger.info(f"🎯 Using {TOTAL_ACCOUNT_PCT}% of account with {TARGET_PROFIT_FACTOR}x target multiplier")
+        
+        if position_size < 100:  # Minimum viable position size
+            logger.error(f"❌ Position size too small: ${position_size:.2f} < $100")
+            sys.exit(1)
+            
+    except Exception as e:
+        logger.error(f"❌ Failed to get account information: {e}")
+        sys.exit(1)
+
+    # Start trading session
+    symbols = [c["symbol"] for c in candidates]
+    logger.info(f"🎯 Starting trading session with {len(symbols)} candidates")
+    
+    try:
+        asyncio.run(find_opening_prices_and_trade(
             symbols=symbols,
-            finnhub_key=FINNHUB_API_KEY,
-            api=alp,
             prev_close=prev_close,
-            window_seconds=15,
-            max_rest_symbols=50
+            bins_data=bins_data,
+            api=alp,
+            finnhub_key=FINNHUB_API_KEY,
+            apca_key=APCA_KEY,
+            apca_secret=APCA_SECRET,
+            position_size=position_size
         ))
     except RuntimeError as e:
-        logger.error(f"❌ Exiting due to timing constraint: {e}")
+        logger.error(f"❌ Trading session failed: {e}")
         sys.exit(1)
 
-    if not best_candidate:
-        logger.error("❌ No candidates met the % increase threshold - exiting")
-        sys.exit(1)
-
-    # Execute buy order for the best candidate
-    buy_order = evaluate_candidates_and_buy(alp, best_candidate)
-    if not buy_order:
-        logger.error("❌ Buy order failed - exiting")
-        sys.exit(1)
-
-    # Monitor the trade with child orders from bracket
-    sym = buy_order["symbol"]
-    qty = buy_order["qty"]
-    entry = float(buy_order["filled_avg_price"])
-    child_orders = buy_order.get("child_orders", [])
-
-    logger.info(f"🎯 Now monitoring position: {qty} shares of {sym} @ ${entry:.2f}")
-    asyncio.run(monitor_trade_ws(alp, sym, qty, entry, FINNHUB_API_KEY, APCA_KEY, APCA_SECRET, child_orders))
-
-    logger.info("🏁 Trading session completed")
+    logger.info("🏁 Enhanced Trading Session Completed")
 
 
 if __name__ == "__main__":

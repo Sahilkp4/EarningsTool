@@ -1,0 +1,1935 @@
+{
+  "generated_at": "2025-09-02T02:30:00.221857+00:00",
+  "mode": "full",
+  "universe": "pre-open earnings universe",
+  "cost_bps": 5.0,
+  "slippage_bps": 5.0,
+  "validation_summary": {
+    "total_strategies_tested": 81,
+    "significant_strategies": 27,
+    "robust_strategies": 27,
+    "final_exported": 27,
+    "avg_monthly_return": 0.9697025118898043,
+    "avg_sharpe_ratio": 15.83126842005506,
+    "avg_win_rate": 0.8940026914175467
+  },
+  "strategies": [
+    {
+      "name": "Ensemble_P50_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "ensemble",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.50 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.5,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.3162183783245525,
+        "total_return": 3.0711762160906226,
+        "sharpe": 18.728017743643388,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 49,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.0626770656345025
+      },
+      "validation": {
+        "p_value_ttest": 0.023665304183281378,
+        "p_value_fdr_adjusted": 0.02440484493900892,
+        "bootstrap_ci_monthly_return": [
+          0.0052701163563774,
+          0.06989493672191857
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.002,
+        "stability_ratio": 0.7415860782404153,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.14119381607440087,
+        "cvar_95": -0.17122823613252636,
+        "downside_deviation": 0.05641267352957621,
+        "return_skewness": 0.14243415798487294,
+        "return_kurtosis": -0.39197601789377856
+      }
+    },
+    {
+      "name": "Ensemble_P55_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "ensemble",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.55 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.55,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.3162183783245525,
+        "total_return": 3.0711762160906226,
+        "sharpe": 18.728017743643388,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 49,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.0626770656345025
+      },
+      "validation": {
+        "p_value_ttest": 0.023665304183281378,
+        "p_value_fdr_adjusted": 0.02440484493900892,
+        "bootstrap_ci_monthly_return": [
+          0.0052701163563774,
+          0.06989493672191857
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.002,
+        "stability_ratio": 0.7415860782404153,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.14119381607440087,
+        "cvar_95": -0.17122823613252636,
+        "downside_deviation": 0.05641267352957621,
+        "return_skewness": 0.14243415798487294,
+        "return_kurtosis": -0.39197601789377856
+      }
+    },
+    {
+      "name": "Ensemble_P60_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "ensemble",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.60 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.6,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.3162183783245525,
+        "total_return": 3.0711762160906226,
+        "sharpe": 18.728017743643388,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 49,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.0626770656345025
+      },
+      "validation": {
+        "p_value_ttest": 0.023665304183281378,
+        "p_value_fdr_adjusted": 0.02440484493900892,
+        "bootstrap_ci_monthly_return": [
+          0.0052701163563774,
+          0.06989493672191857
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.002,
+        "stability_ratio": 0.7415860782404153,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.14119381607440087,
+        "cvar_95": -0.17122823613252636,
+        "downside_deviation": 0.05641267352957621,
+        "return_skewness": 0.14243415798487294,
+        "return_kurtosis": -0.39197601789377856
+      }
+    },
+    {
+      "name": "Logistic_P60_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "logistic",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.60 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.6,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.2447794154261989,
+        "total_return": 23.117332000772265,
+        "sharpe": 21.491792206624726,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 390,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.05927521025839042
+      },
+      "validation": {
+        "p_value_ttest": 9.192646120672173e-24,
+        "p_value_fdr_adjusted": 1.4445586761056274e-23,
+        "bootstrap_ci_monthly_return": [
+          0.050718534145913804,
+          0.07174597951835164
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.8129256366350961,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 0.8,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11174377175906341,
+        "cvar_95": -0.16177303392018544,
+        "downside_deviation": 0.055823994873041065,
+        "return_skewness": 0.17411402441740026,
+        "return_kurtosis": 0.5375520350609526
+      }
+    },
+    {
+      "name": "Logistic_P55_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "logistic",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.55 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.55,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.2221685993637537,
+        "total_return": 23.337600397374537,
+        "sharpe": 21.163906239860136,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 401,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.05819850473160732
+      },
+      "validation": {
+        "p_value_ttest": 5.482877788468122e-24,
+        "p_value_fdr_adjusted": 9.046748350972401e-24,
+        "bootstrap_ci_monthly_return": [
+          0.04937786338887825,
+          0.0707962337831829
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.7951900794490598,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 0.8,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11215025853568297,
+        "cvar_95": -0.15880615503396492,
+        "downside_deviation": 0.054722144026036895,
+        "return_skewness": 0.1640875539156922,
+        "return_kurtosis": 0.42918012330046196
+      }
+    },
+    {
+      "name": "Random_Forest_P60_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "random_forest",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.60 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.6,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.220714814676542,
+        "total_return": 23.484227863301093,
+        "sharpe": 21.241906754546214,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 404,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.05812927688935914
+      },
+      "validation": {
+        "p_value_ttest": 3.6133144554799065e-24,
+        "p_value_fdr_adjusted": 6.275756685833521e-24,
+        "bootstrap_ci_monthly_return": [
+          0.04930909373196531,
+          0.06991767892870995
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.8145386019532284,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11174776341232343,
+        "cvar_95": -0.1586172531455155,
+        "downside_deviation": 0.054653631927136494,
+        "return_skewness": 0.16845296682041394,
+        "return_kurtosis": 0.4491876190998618
+      }
+    },
+    {
+      "name": "Random_Forest_P50_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "random_forest",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.50 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.5,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.2185256022918658,
+        "total_return": 23.50013661562884,
+        "sharpe": 21.205327251115985,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 405,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.058025028680565034
+      },
+      "validation": {
+        "p_value_ttest": 3.575315318947558e-24,
+        "p_value_fdr_adjusted": 6.275756685833521e-24,
+        "bootstrap_ci_monthly_return": [
+          0.04941187990642422,
+          0.06957143930707328
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.8182160412501099,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11145782044202163,
+        "cvar_95": -0.15833279124595093,
+        "downside_deviation": 0.05455561689000915,
+        "return_skewness": 0.1718404067164528,
+        "return_kurtosis": 0.4546307547286452
+      }
+    },
+    {
+      "name": "Random_Forest_P55_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "random_forest",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.55 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.55,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.2185256022918658,
+        "total_return": 23.50013661562884,
+        "sharpe": 21.205327251115985,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 405,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.058025028680565034
+      },
+      "validation": {
+        "p_value_ttest": 3.575315318947558e-24,
+        "p_value_fdr_adjusted": 6.275756685833521e-24,
+        "bootstrap_ci_monthly_return": [
+          0.04941187990642422,
+          0.06957143930707328
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.8182160412501099,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11145782044202163,
+        "cvar_95": -0.15833279124595093,
+        "downside_deviation": 0.05455561689000915,
+        "return_skewness": 0.1718404067164528,
+        "return_kurtosis": 0.4546307547286452
+      }
+    },
+    {
+      "name": "Lightgbm_P50_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "lightgbm",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.50 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.5,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.2169841200298206,
+        "total_return": 23.528359653909867,
+        "sharpe": 21.19334746438882,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 406,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.05795162476332479
+      },
+      "validation": {
+        "p_value_ttest": 2.249375947589591e-24,
+        "p_value_fdr_adjusted": 6.185783855871375e-24,
+        "bootstrap_ci_monthly_return": [
+          0.04907787889648179,
+          0.06974316609834327
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.831253297225717,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 0.8,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11122739909322872,
+        "cvar_95": -0.1581324941091926,
+        "downside_deviation": 0.05448660191357147,
+        "return_skewness": 0.16773787584373864,
+        "return_kurtosis": 0.45564855020722117
+      }
+    },
+    {
+      "name": "Lightgbm_P55_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "lightgbm",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.55 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.55,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.2169841200298206,
+        "total_return": 23.528359653909867,
+        "sharpe": 21.19334746438882,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 406,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.05795162476332479
+      },
+      "validation": {
+        "p_value_ttest": 2.249375947589591e-24,
+        "p_value_fdr_adjusted": 6.185783855871375e-24,
+        "bootstrap_ci_monthly_return": [
+          0.04907787889648179,
+          0.06974316609834327
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.831253297225717,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 0.8,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11122739909322872,
+        "cvar_95": -0.1581324941091926,
+        "downside_deviation": 0.05448660191357147,
+        "return_skewness": 0.16773787584373864,
+        "return_kurtosis": 0.45564855020722117
+      }
+    },
+    {
+      "name": "Lightgbm_P60_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "lightgbm",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.60 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.6,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.2169841200298206,
+        "total_return": 23.528359653909867,
+        "sharpe": 21.19334746438882,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 406,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.05795162476332479
+      },
+      "validation": {
+        "p_value_ttest": 2.249375947589591e-24,
+        "p_value_fdr_adjusted": 6.185783855871375e-24,
+        "bootstrap_ci_monthly_return": [
+          0.04907787889648179,
+          0.06974316609834327
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.831253297225717,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 0.8,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11122739909322872,
+        "cvar_95": -0.1581324941091926,
+        "downside_deviation": 0.05448660191357147,
+        "return_skewness": 0.16773787584373864,
+        "return_kurtosis": 0.45564855020722117
+      }
+    },
+    {
+      "name": "Xgboost_P60_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "xgboost",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.60 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.6,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.2166886175492209,
+        "total_return": 23.522646605951604,
+        "sharpe": 21.18207376097932,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 406,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.057937553216629564
+      },
+      "validation": {
+        "p_value_ttest": 2.249375947589591e-24,
+        "p_value_fdr_adjusted": 6.185783855871375e-24,
+        "bootstrap_ci_monthly_return": [
+          0.04906596203190007,
+          0.0697262313838735
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.8312532972257171,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11120039136831125,
+        "cvar_95": -0.15809409710507105,
+        "downside_deviation": 0.054473371727770434,
+        "return_skewness": 0.1677378758437386,
+        "return_kurtosis": 0.4556485502072216
+      }
+    },
+    {
+      "name": "Mlp_P60_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "mlp",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.60 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.6,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.2152928204009679,
+        "total_return": 23.553532281104474,
+        "sharpe": 21.17474841417741,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 407,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.057871086685760374
+      },
+      "validation": {
+        "p_value_ttest": 3.2864054658349338e-24,
+        "p_value_fdr_adjusted": 6.275756685833521e-24,
+        "bootstrap_ci_monthly_return": [
+          0.0487321008194876,
+          0.06959613102499528
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.8395025036805661,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 0.8,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11098352258825385,
+        "cvar_95": -0.15791273000200784,
+        "downside_deviation": 0.05419281190947685,
+        "return_skewness": 0.17192736814622375,
+        "return_kurtosis": 0.4482943607896783
+      }
+    },
+    {
+      "name": "Xgboost_P50_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "xgboost",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.50 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.5,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.2146968359159869,
+        "total_return": 23.541981534181268,
+        "sharpe": 21.152908953412574,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 407,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.05784270647218985
+      },
+      "validation": {
+        "p_value_ttest": 3.2864054658349334e-24,
+        "p_value_fdr_adjusted": 6.275756685833521e-24,
+        "bootstrap_ci_monthly_return": [
+          0.048708202401327484,
+          0.06956200080254245
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.8395025036805664,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11092909582258818,
+        "cvar_95": -0.1578352889643564,
+        "downside_deviation": 0.05416623553664443,
+        "return_skewness": 0.17192736814622325,
+        "return_kurtosis": 0.44829436078967744
+      }
+    },
+    {
+      "name": "Xgboost_P55_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "xgboost",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.55 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.55,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.2146968359159869,
+        "total_return": 23.541981534181268,
+        "sharpe": 21.152908953412574,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 407,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.05784270647218985
+      },
+      "validation": {
+        "p_value_ttest": 3.2864054658349334e-24,
+        "p_value_fdr_adjusted": 6.275756685833521e-24,
+        "bootstrap_ci_monthly_return": [
+          0.048708202401327484,
+          0.06956200080254245
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.8395025036805664,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11092909582258818,
+        "cvar_95": -0.1578352889643564,
+        "downside_deviation": 0.05416623553664443,
+        "return_skewness": 0.17192736814622325,
+        "return_kurtosis": 0.44829436078967744
+      }
+    },
+    {
+      "name": "Mlp_P50_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "mlp",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.50 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.5,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.2112433015651154,
+        "total_return": 23.59040525429201,
+        "sharpe": 21.11332048710918,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 409,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.057678252455481686
+      },
+      "validation": {
+        "p_value_ttest": 2.0828189857682833e-24,
+        "p_value_fdr_adjusted": 6.185783855871375e-24,
+        "bootstrap_ci_monthly_return": [
+          0.04797698505872725,
+          0.0697080675672698
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.8574892870718609,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 0.8,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11043570850597102,
+        "cvar_95": -0.15738654358517945,
+        "downside_deviation": 0.054012234184576915,
+        "return_skewness": 0.1727124314100311,
+        "return_kurtosis": 0.46466649724205533
+      }
+    },
+    {
+      "name": "Mlp_P55_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "mlp",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.55 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.55,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.2112433015651154,
+        "total_return": 23.59040525429201,
+        "sharpe": 21.11332048710918,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 409,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.057678252455481686
+      },
+      "validation": {
+        "p_value_ttest": 2.0828189857682833e-24,
+        "p_value_fdr_adjusted": 6.185783855871375e-24,
+        "bootstrap_ci_monthly_return": [
+          0.04797698505872725,
+          0.0697080675672698
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.8574892870718609,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 0.8,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11043570850597102,
+        "cvar_95": -0.15738654358517945,
+        "downside_deviation": 0.054012234184576915,
+        "return_skewness": 0.1727124314100311,
+        "return_kurtosis": 0.46466649724205533
+      }
+    },
+    {
+      "name": "Logistic_P50_V0_Capall",
+      "version": "1.0.0",
+      "signal_type": "ml_probability_based",
+      "model_base": "logistic",
+      "features_used": [
+        "high_before_low",
+        "pct_1min",
+        "pct_change_close",
+        "pct_change_high",
+        "pct_change_open",
+        "sort_key",
+        "intraday_vol",
+        "close_position",
+        "direction_consistency",
+        "market_cap_log_sector_rank",
+        "risk_adjusted_return",
+        "pct_15min",
+        "pct_1hr",
+        "pct_5min",
+        "pct_change_low",
+        "early_momentum",
+        "momentum_acceleration",
+        "surprise_x_volume_ratio_7d",
+        "surprise_x_gap",
+        "volume_30d_log"
+      ],
+      "entry_rule": "go_long if P(next_session_return>0.02) >= 0.50 and volume_ratio_7_day >= 0.0",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {
+        "prob_threshold": 0.5,
+        "vol_threshold": 0,
+        "cap_filter": "all"
+      },
+      "expected_metrics_oos": {
+        "monthly_return": 1.1984000742258467,
+        "total_return": 23.56853479310832,
+        "sharpe": 20.820295770957006,
+        "sortino": 0,
+        "max_drawdown": 0.0,
+        "win_rate": 1.0,
+        "trades": 413,
+        "profit_factor": Infinity,
+        "avg_trade_return": 0.057066670201230796
+      },
+      "validation": {
+        "p_value_ttest": 2.636566154180252e-24,
+        "p_value_fdr_adjusted": 6.275756685833521e-24,
+        "bootstrap_ci_monthly_return": [
+          0.04786354952111856,
+          0.06811205460733914
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.8320136978320404,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 0.8,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.11065430110197386,
+        "cvar_95": -0.15610142138508992,
+        "downside_deviation": 0.053231842877498756,
+        "return_skewness": 0.16872047195352194,
+        "return_kurtosis": 0.4418326829350083
+      }
+    },
+    {
+      "name": "Rule_pct_15min_GT1.0pct",
+      "version": "1.0.0",
+      "signal_type": "rule_based",
+      "model_base": "rule_based",
+      "features_used": [],
+      "entry_rule": "Long if pct_15min > 1.0%",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {},
+      "expected_metrics_oos": {
+        "monthly_return": 0.706100947659329,
+        "total_return": 16.206697941514122,
+        "sharpe": 9.637424226878423,
+        "sortino": 18.640676108041497,
+        "max_drawdown": -0.23273863822512084,
+        "win_rate": 0.7842323651452282,
+        "trades": 482,
+        "profit_factor": 6.163539748129939,
+        "avg_trade_return": 0.033623854650444235
+      },
+      "validation": {
+        "p_value_ttest": 5.2046992901114544e-21,
+        "p_value_fdr_adjusted": 7.46761202494252e-21,
+        "bootstrap_ci_monthly_return": [
+          0.028748711991540103,
+          0.042676318853153726
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.9578591148095177,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.09364087774641554,
+        "cvar_95": -0.1513614225217544,
+        "downside_deviation": 0.06202206530775259,
+        "return_skewness": 0.09250760221413337,
+        "return_kurtosis": 2.993989101157644
+      }
+    },
+    {
+      "name": "Rule_pct_15min_GT0.5pct",
+      "version": "1.0.0",
+      "signal_type": "rule_based",
+      "model_base": "rule_based",
+      "features_used": [],
+      "entry_rule": "Long if pct_15min > 0.5%",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {},
+      "expected_metrics_oos": {
+        "monthly_return": 0.6198850857126518,
+        "total_return": 16.677860639411822,
+        "sharpe": 8.611236815327427,
+        "sortino": 16.132829157128153,
+        "max_drawdown": -0.235454743445804,
+        "win_rate": 0.7504424778761062,
+        "trades": 565,
+        "profit_factor": 5.0927738613664015,
+        "avg_trade_return": 0.02951833741488818
+      },
+      "validation": {
+        "p_value_ttest": 3.447862125501191e-27,
+        "p_value_fdr_adjusted": 1.896324169025655e-26,
+        "bootstrap_ci_monthly_return": [
+          0.028494259597729027,
+          0.039697872331666766
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.9280620927725036,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.06613997872613778,
+        "cvar_95": -0.11498240262375144,
+        "downside_deviation": 0.045538454559064405,
+        "return_skewness": 0.5143069106237756,
+        "return_kurtosis": 2.8226193919530314
+      }
+    },
+    {
+      "name": "Rule_pct_5min_GT1.0pct",
+      "version": "1.0.0",
+      "signal_type": "rule_based",
+      "model_base": "rule_based",
+      "features_used": [],
+      "entry_rule": "Long if pct_5min > 1.0%",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {},
+      "expected_metrics_oos": {
+        "monthly_return": 0.5988552343540442,
+        "total_return": 12.946679828416004,
+        "sharpe": 7.996630695578989,
+        "sortino": 16.142938878012586,
+        "max_drawdown": -0.23253634850333174,
+        "win_rate": 0.7444933920704846,
+        "trades": 454,
+        "profit_factor": 4.454795376680623,
+        "avg_trade_return": 0.028516915921621155
+      },
+      "validation": {
+        "p_value_ttest": 1.1518573104750836e-18,
+        "p_value_fdr_adjusted": 1.5204516498271104e-18,
+        "bootstrap_ci_monthly_return": [
+          0.02171619756336847,
+          0.0328789759420618
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.8333458910656216,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.07397335942229684,
+        "cvar_95": -0.10511868851270209,
+        "downside_deviation": 0.03793620964530606,
+        "return_skewness": 0.623024160490567,
+        "return_kurtosis": 2.416490512370485
+      }
+    },
+    {
+      "name": "Rule_pct_15min_GT0pct",
+      "version": "1.0.0",
+      "signal_type": "rule_based",
+      "model_base": "rule_based",
+      "features_used": [],
+      "entry_rule": "Long if pct_15min > 0%",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {},
+      "expected_metrics_oos": {
+        "monthly_return": 0.5254146280463183,
+        "total_return": 16.513031167170006,
+        "sharpe": 7.473349852924797,
+        "sortino": 13.804342076081415,
+        "max_drawdown": -0.23545474344580394,
+        "win_rate": 0.7136363636363636,
+        "trades": 660,
+        "profit_factor": 4.1100303326596626,
+        "avg_trade_return": 0.025019744192681825
+      },
+      "validation": {
+        "p_value_ttest": 6.8701902580648795e-22,
+        "p_value_fdr_adjusted": 1.030528538709732e-21,
+        "bootstrap_ci_monthly_return": [
+          0.01939981737155678,
+          0.029174843663328915
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.843932534339915,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.06840811925320331,
+        "cvar_95": -0.11047995722850576,
+        "downside_deviation": 0.040664408448664056,
+        "return_skewness": 0.3878133427492562,
+        "return_kurtosis": 2.9512014100768624
+      }
+    },
+    {
+      "name": "Rule_pct_5min_GT0.5pct",
+      "version": "1.0.0",
+      "signal_type": "rule_based",
+      "model_base": "rule_based",
+      "features_used": [],
+      "entry_rule": "Long if pct_5min > 0.5%",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {},
+      "expected_metrics_oos": {
+        "monthly_return": 0.5075807505399605,
+        "total_return": 13.680509752648462,
+        "sharpe": 7.099356090491028,
+        "sortino": 13.754855223550319,
+        "max_drawdown": -0.26225071063946237,
+        "win_rate": 0.7120141342756183,
+        "trades": 566,
+        "profit_factor": 3.809578405244456,
+        "avg_trade_return": 0.024170511930474314
+      },
+      "validation": {
+        "p_value_ttest": 2.1095289540846503e-20,
+        "p_value_fdr_adjusted": 2.900602311866394e-20,
+        "bootstrap_ci_monthly_return": [
+          0.019037858691236177,
+          0.029039910348751957
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.9952373950727411,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.06093758874754768,
+        "cvar_95": -0.09772902584225687,
+        "downside_deviation": 0.03589917666519766,
+        "return_skewness": 0.573067713137166,
+        "return_kurtosis": 2.6487617905167955
+      }
+    },
+    {
+      "name": "Rule_pct_5min_GT0pct",
+      "version": "1.0.0",
+      "signal_type": "rule_based",
+      "model_base": "rule_based",
+      "features_used": [],
+      "entry_rule": "Long if pct_5min > 0%",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {},
+      "expected_metrics_oos": {
+        "monthly_return": 0.41036903835125654,
+        "total_return": 13.092726461682947,
+        "sharpe": 5.76659957723289,
+        "sortino": 10.40871483949621,
+        "max_drawdown": -0.3124731884771831,
+        "win_rate": 0.6671641791044776,
+        "trades": 670,
+        "profit_factor": 2.9351699515353085,
+        "avg_trade_return": 0.019541382778631263
+      },
+      "validation": {
+        "p_value_ttest": 2.312744879598183e-16,
+        "p_value_fdr_adjusted": 2.9354069625669246e-16,
+        "bootstrap_ci_monthly_return": [
+          0.012406716380770386,
+          0.019832066671501402
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.7813162689649715,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.059364804282567525,
+        "cvar_95": -0.08878406228056669,
+        "downside_deviation": 0.031074816247714042,
+        "return_skewness": 0.41499894433184636,
+        "return_kurtosis": 2.779280956410642
+      }
+    },
+    {
+      "name": "Rule_pct_1min_GT1.0pct",
+      "version": "1.0.0",
+      "signal_type": "rule_based",
+      "model_base": "rule_based",
+      "features_used": [],
+      "entry_rule": "Long if pct_1min > 1.0%",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {},
+      "expected_metrics_oos": {
+        "monthly_return": 0.26030242715477603,
+        "total_return": 2.950094174420795,
+        "sharpe": 2.812618573043719,
+        "sortino": 4.428249851899106,
+        "max_drawdown": -0.41029929072349286,
+        "win_rate": 0.6218487394957983,
+        "trades": 238,
+        "profit_factor": 1.5984342422203592,
+        "avg_trade_return": 0.012395353674036954
+      },
+      "validation": {
+        "p_value_ttest": 0.01507887428666955,
+        "p_value_fdr_adjusted": 0.01715871901586535,
+        "bootstrap_ci_monthly_return": [
+          0.001032389970252409,
+          0.00976866562245876
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.8494893555377787,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.056065985209580206,
+        "cvar_95": -0.07946176825834204,
+        "downside_deviation": 0.026863867045377604,
+        "return_skewness": -0.357318594056971,
+        "return_kurtosis": 2.386424296294879
+      }
+    },
+    {
+      "name": "Rule_pct_1min_GT0.5pct",
+      "version": "1.0.0",
+      "signal_type": "rule_based",
+      "model_base": "rule_based",
+      "features_used": [],
+      "entry_rule": "Long if pct_1min > 0.5%",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {},
+      "expected_metrics_oos": {
+        "monthly_return": 0.22008566522123788,
+        "total_return": 3.804337927395683,
+        "sharpe": 2.6280716906102772,
+        "sortino": 4.222284653740156,
+        "max_drawdown": -0.3866299724269532,
+        "win_rate": 0.5840220385674931,
+        "trades": 363,
+        "profit_factor": 1.5691199226764256,
+        "avg_trade_return": 0.010480269772439899
+      },
+      "validation": {
+        "p_value_ttest": 5.761477056969275e-05,
+        "p_value_fdr_adjusted": 7.041805291851336e-05,
+        "bootstrap_ci_monthly_return": [
+          0.0030840764910792353,
+          0.009080979959434948
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.5377906795517796,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.03503595997344583,
+        "cvar_95": -0.04501527905783041,
+        "downside_deviation": 0.014165963669729362,
+        "return_skewness": 1.2373392883221863,
+        "return_kurtosis": 4.533353095732764
+      }
+    },
+    {
+      "name": "Rule_pct_1min_GT0pct",
+      "version": "1.0.0",
+      "signal_type": "rule_based",
+      "model_base": "rule_based",
+      "features_used": [],
+      "entry_rule": "Long if pct_1min > 0%",
+      "exit_rule": "exit at EOD or if TP=+2.0% or SL=-1.0%",
+      "position_sizing": "equal_weight_per_trade",
+      "constraints": {
+        "max_positions": 10,
+        "max_turnover_daily": 0.5,
+        "stop_loss": -0.01,
+        "take_profit": 0.02
+      },
+      "parameter_thresholds": {},
+      "expected_metrics_oos": {
+        "monthly_return": 0.12679072773355585,
+        "total_return": 3.308634228475648,
+        "sharpe": 1.6370276648821864,
+        "sortino": 2.5288810723341024,
+        "max_drawdown": -0.4900555483837407,
+        "win_rate": 0.5602189781021898,
+        "trades": 548,
+        "profit_factor": 1.3349857154255622,
+        "avg_trade_return": 0.006037653701597897
+      },
+      "validation": {
+        "p_value_ttest": 0.0021603393411486413,
+        "p_value_fdr_adjusted": 0.002546114223496613,
+        "bootstrap_ci_monthly_return": [
+          0.000776828743131413,
+          0.0032806251488372395
+        ],
+        "whites_reality_check_passed": true,
+        "monte_carlo_p_value": 0.0,
+        "stability_ratio": 0.8321917256855509,
+        "overall_significant": "True"
+      },
+      "robustness": {
+        "robustness_score": 1.0,
+        "passes_robustness": "True",
+        "sector_consistent": false,
+        "cost_robust": "True",
+        "temporal_consistent": false
+      },
+      "risk_metrics": {
+        "var_95": -0.019809686800355584,
+        "cvar_95": -0.03171614088638232,
+        "downside_deviation": 0.009964701802305728,
+        "return_skewness": 0.10277523151105245,
+        "return_kurtosis": 1.8642475136753731
+      }
+    }
+  ],
+  "methodology": {
+    "feature_engineering": "Comprehensive with 100+ derived features",
+    "feature_selection": "Multi-stage: filter, wrapper, embedded, ensemble",
+    "models": "Logistic, Random Forest, XGBoost, LightGBM, MLP, Ensemble",
+    "validation": "Time-aware CV with embargo periods",
+    "statistical_testing": "Multiple corrections, White's Reality Check, Bootstrap CI",
+    "robustness": "Sector, market-cap, temporal, cost, feature ablation testing"
+  },
+  "notes": "Only strategies passing comprehensive significance and robustness testing are exported. All strategies meet \u22652% monthly return target after transaction costs."
+}

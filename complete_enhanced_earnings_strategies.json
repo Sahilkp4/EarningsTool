@@ -1,0 +1,417 @@
+{
+  "metadata": {
+    "analysis_type": "complete_enhanced_earnings_analysis",
+    "generated_at": "2025-08-18T02:46:10.339374+00:00",
+    "runtime_seconds": 23.336366,
+    "version": "2.0_fixed",
+    "total_samples": 115,
+    "significant_results": {
+      "individual_features": 10,
+      "feature_combinations": 1
+    },
+    "analysis_settings": {
+      "min_samples_per_bin": 30,
+      "min_daily_return_threshold": 0.5,
+      "min_sharpe_threshold": 0.5,
+      "significance_level": 0.05,
+      "primary_binning_method": "quartile"
+    }
+  },
+  "significant_strategies": {
+    "individual_features": [
+      {
+        "strategy_name": "pct_change_close_2.58_to_40.28",
+        "feature": "pct_change_close",
+        "bin_condition": "2.58_to_40.28",
+        "binning_method": "decision_tree",
+        "performance": {
+          "mean_return_pct": 13.396648122552238,
+          "sharpe_ratio": 24.338254535448502,
+          "win_rate": 1.0,
+          "kelly_criterion": 0.0,
+          "sample_size": 30,
+          "p_value": 2.694313265205374e-07
+        },
+        "optimal_stops": {
+          "stop_loss_pct": -11.0,
+          "target_profit_pct": 10.0
+        },
+        "risk_metrics": {
+          "max_drawdown": 0.0,
+          "calmar_ratio": 24.338254535448502,
+          "volatility": 8.737898426320426
+        }
+      },
+      {
+        "strategy_name": "pct_1hr_-0.49_to_1.66",
+        "feature": "pct_1hr",
+        "bin_condition": "-0.49_to_1.66",
+        "binning_method": "decision_tree",
+        "performance": {
+          "mean_return_pct": 5.042906691853637,
+          "sharpe_ratio": 16.558863388863305,
+          "win_rate": 0.6666666666666666,
+          "kelly_criterion": 1,
+          "sample_size": 30,
+          "p_value": 0.00031908109999612415
+        },
+        "optimal_stops": {
+          "stop_loss_pct": -9.0,
+          "target_profit_pct": 10.0
+        },
+        "risk_metrics": {
+          "max_drawdown": -0.020030163659224227,
+          "calmar_ratio": 251.76562596538216,
+          "volatility": 4.834490150038269
+        }
+      },
+      {
+        "strategy_name": "pct_change_high_6.76_to_25.40",
+        "feature": "pct_change_high",
+        "bin_condition": "6.76_to_25.40",
+        "binning_method": "decision_tree",
+        "performance": {
+          "mean_return_pct": 9.284730572244046,
+          "sharpe_ratio": 11.380694388279093,
+          "win_rate": 0.6666666666666666,
+          "kelly_criterion": 1,
+          "sample_size": 30,
+          "p_value": 0.04440597469038622
+        },
+        "optimal_stops": {
+          "stop_loss_pct": -11.0,
+          "target_profit_pct": 14.0
+        },
+        "risk_metrics": {
+          "max_drawdown": -0.11289037603569166,
+          "calmar_ratio": 82.2455456194828,
+          "volatility": 12.950925793963295
+        }
+      },
+      {
+        "strategy_name": "high_from_open_pct_6.76_to_25.40",
+        "feature": "high_from_open_pct",
+        "bin_condition": "6.76_to_25.40",
+        "binning_method": "decision_tree",
+        "performance": {
+          "mean_return_pct": 9.284730572244046,
+          "sharpe_ratio": 11.380694388279093,
+          "win_rate": 0.6666666666666666,
+          "kelly_criterion": 1,
+          "sample_size": 30,
+          "p_value": 0.04440597469038622
+        },
+        "optimal_stops": {
+          "stop_loss_pct": -11.0,
+          "target_profit_pct": 14.0
+        },
+        "risk_metrics": {
+          "max_drawdown": -0.11289037603569166,
+          "calmar_ratio": 82.2455456194828,
+          "volatility": 12.950925793963295
+        }
+      },
+      {
+        "strategy_name": "premarket_gain_pct_6.99_to_59.62",
+        "feature": "premarket_gain_pct",
+        "bin_condition": "6.99_to_59.62",
+        "binning_method": "decision_tree",
+        "performance": {
+          "mean_return_pct": 8.420485149651531,
+          "sharpe_ratio": 11.216529412489265,
+          "win_rate": 0.7142857142857143,
+          "kelly_criterion": 1,
+          "sample_size": 35,
+          "p_value": 0.01753079847156681
+        },
+        "optimal_stops": {
+          "stop_loss_pct": -11.0,
+          "target_profit_pct": 9.0
+        },
+        "risk_metrics": {
+          "max_drawdown": -0.0702676864244744,
+          "calmar_ratio": 119.83438729980239,
+          "volatility": 11.91732779643087
+        }
+      },
+      {
+        "strategy_name": "volume_ratio_open_to_pre_0.93_to_25.38",
+        "feature": "volume_ratio_open_to_pre",
+        "bin_condition": "0.93_to_25.38",
+        "binning_method": "decision_tree",
+        "performance": {
+          "mean_return_pct": 4.880578168413667,
+          "sharpe_ratio": 10.949919759815824,
+          "win_rate": 0.5714285714285714,
+          "kelly_criterion": 1,
+          "sample_size": 35,
+          "p_value": 0.023361678105948244
+        },
+        "optimal_stops": {
+          "stop_loss_pct": -2.0,
+          "target_profit_pct": 7.0
+        },
+        "risk_metrics": {
+          "max_drawdown": -0.034892154327940225,
+          "calmar_ratio": 139.87609141420933,
+          "volatility": 7.075556554425857
+        }
+      },
+      {
+        "strategy_name": "pct_change_open_-0.27_to_26.68",
+        "feature": "pct_change_open",
+        "bin_condition": "-0.27_to_26.68",
+        "binning_method": "decision_tree",
+        "performance": {
+          "mean_return_pct": 6.660152649030253,
+          "sharpe_ratio": 10.536417865806055,
+          "win_rate": 0.7272727272727273,
+          "kelly_criterion": 1,
+          "sample_size": 55,
+          "p_value": 0.000767370504967813
+        },
+        "optimal_stops": {
+          "stop_loss_pct": -11.0,
+          "target_profit_pct": 8.0
+        },
+        "risk_metrics": {
+          "max_drawdown": -0.0702676864244744,
+          "calmar_ratio": 94.78258055626699,
+          "volatility": 10.034401346352098
+        }
+      },
+      {
+        "strategy_name": "gap_pct_-0.27_to_26.68",
+        "feature": "gap_pct",
+        "bin_condition": "-0.27_to_26.68",
+        "binning_method": "decision_tree",
+        "performance": {
+          "mean_return_pct": 6.660152649030253,
+          "sharpe_ratio": 10.536417865806055,
+          "win_rate": 0.7272727272727273,
+          "kelly_criterion": 1,
+          "sample_size": 55,
+          "p_value": 0.000767370504967813
+        },
+        "optimal_stops": {
+          "stop_loss_pct": -11.0,
+          "target_profit_pct": 8.0
+        },
+        "risk_metrics": {
+          "max_drawdown": -0.0702676864244744,
+          "calmar_ratio": 94.78258055626699,
+          "volatility": 10.034401346352098
+        }
+      },
+      {
+        "strategy_name": "market_cap_Above_442.28",
+        "feature": "market_cap",
+        "bin_condition": "Above_442.28",
+        "binning_method": "decision_tree",
+        "performance": {
+          "mean_return_pct": 6.47820884949328,
+          "sharpe_ratio": 9.286868518896844,
+          "win_rate": 0.5555555555555556,
+          "kelly_criterion": 1,
+          "sample_size": 45,
+          "p_value": 0.027452873122191367
+        },
+        "optimal_stops": {
+          "stop_loss_pct": -11.0,
+          "target_profit_pct": 10.0
+        },
+        "risk_metrics": {
+          "max_drawdown": -0.08796172823121319,
+          "calmar_ratio": 73.64803966180475,
+          "volatility": 11.073525713444502
+        }
+      },
+      {
+        "strategy_name": "log_market_cap_6.08_to_8.17",
+        "feature": "log_market_cap",
+        "bin_condition": "6.08_to_8.17",
+        "binning_method": "decision_tree",
+        "performance": {
+          "mean_return_pct": 6.47820884949328,
+          "sharpe_ratio": 9.286868518896844,
+          "win_rate": 0.5555555555555556,
+          "kelly_criterion": 1,
+          "sample_size": 45,
+          "p_value": 0.027452873122191367
+        },
+        "optimal_stops": {
+          "stop_loss_pct": -11.0,
+          "target_profit_pct": 10.0
+        },
+        "risk_metrics": {
+          "max_drawdown": -0.08796172823121319,
+          "calmar_ratio": 73.64803966180475,
+          "volatility": 11.073525713444502
+        }
+      }
+    ],
+    "feature_combinations": [
+      {
+        "strategy_name": "pct_change_open:-0.27_to_26.68_AND_gap_pct:-0.27_to_26.68",
+        "conditions": {
+          "pct_change_open": "-0.27_to_26.68",
+          "gap_pct": "-0.27_to_26.68"
+        },
+        "performance": {
+          "mean_return_pct": 6.660152649030253,
+          "sharpe_ratio": 10.536417865806055,
+          "win_rate": 0.7272727272727273,
+          "kelly_criterion": 1,
+          "sample_size": 55,
+          "p_value": 8.432642911734209e-06
+        },
+        "optimal_stops": {
+          "stop_loss_pct": -11.0,
+          "target_profit_pct": 8.0
+        },
+        "interaction_effect": 4.522965436563355,
+        "risk_metrics": {
+          "calmar_ratio": 94.78258055626699,
+          "risk_adjusted_return": 0.657182641718407,
+          "volatility": 10.034401346352098
+        }
+      }
+    ]
+  },
+  "feature_analysis_summary": {
+    "total_features_analyzed": 39,
+    "successfully_binned": 32,
+    "binning_methods_used": [
+      "equal_width",
+      "decision_tree",
+      "categorical",
+      "quartile"
+    ],
+    "top_performing_features": [
+      {
+        "feature": "pct_change_close",
+        "best_bin": "2.58_to_40.28",
+        "sharpe_ratio": 24.338254535448502,
+        "return_pct": 13.396648122552238
+      },
+      {
+        "feature": "pct_1hr",
+        "best_bin": "-0.49_to_1.66",
+        "sharpe_ratio": 16.558863388863305,
+        "return_pct": 5.042906691853637
+      },
+      {
+        "feature": "pct_change_high",
+        "best_bin": "6.76_to_25.40",
+        "sharpe_ratio": 11.380694388279093,
+        "return_pct": 9.284730572244046
+      },
+      {
+        "feature": "high_from_open_pct",
+        "best_bin": "6.76_to_25.40",
+        "sharpe_ratio": 11.380694388279093,
+        "return_pct": 9.284730572244046
+      },
+      {
+        "feature": "premarket_gain_pct",
+        "best_bin": "6.99_to_59.62",
+        "sharpe_ratio": 11.216529412489265,
+        "return_pct": 8.420485149651531
+      },
+      {
+        "feature": "volume_ratio_open_to_pre",
+        "best_bin": "0.93_to_25.38",
+        "sharpe_ratio": 10.949919759815824,
+        "return_pct": 4.880578168413667
+      },
+      {
+        "feature": "pct_change_open",
+        "best_bin": "-0.27_to_26.68",
+        "sharpe_ratio": 10.536417865806055,
+        "return_pct": 6.660152649030253
+      },
+      {
+        "feature": "gap_pct",
+        "best_bin": "-0.27_to_26.68",
+        "sharpe_ratio": 10.536417865806055,
+        "return_pct": 6.660152649030253
+      },
+      {
+        "feature": "market_cap",
+        "best_bin": "Above_442.28",
+        "sharpe_ratio": 9.286868518896844,
+        "return_pct": 6.47820884949328
+      },
+      {
+        "feature": "log_market_cap",
+        "best_bin": "6.08_to_8.17",
+        "sharpe_ratio": 9.286868518896844,
+        "return_pct": 6.47820884949328
+      }
+    ]
+  },
+  "machine_learning_insights": {
+    "methods_completed": [
+      "random_forest",
+      "feature_importance",
+      "interaction_detection"
+    ],
+    "feature_importance": {
+      "pct_change_close_bin_2.58_to_40.28": 0.72568460584009,
+      "pct_change_close_bin_-6.22_to_2.58": 0.2004527606145247,
+      "momentum_1_to_5_bin_-13.50_to_-0.30": 0.012499919146392495,
+      "premarket_range_pct_bin_7.06_to_53.13": 0.011710785654793776,
+      "total_surprise_score_bin_9.92_to_137.16": 0.009586535049732703,
+      "pct_change_low_bin_-3.68_to_-2.45": 0.007392709552288797,
+      "eps_surprise_bin_8.47_to_129.08": 0.006961535215248508,
+      "low_from_open_pct_bin_-3.68_to_-2.45": 0.006342956500586853,
+      "premarket_volume_bin_Above_255498.50": 0.005757754142598434,
+      "earnings_time_bin_bmo": 0.003949508243003048,
+      "pct_30min_bin_-25.68_to_-1.10": 0.002542603066889665,
+      "intraday_volatility_bin_2.00_to_2.91": 0.001306080039870282,
+      "opening_minute_volume_bin_Top_50%": 0.0012321600211065238,
+      "pct_change_high_bin_3.72_to_6.76": 0.0010122674464097393,
+      "high_from_open_pct_bin_3.72_to_6.76": 0.0007604104881350286
+    },
+    "top_interactions": [
+      {
+        "interaction": "revenue_surprise_bin_2.81_to_51.02 \u00d7 pct_change_low_bin_-3.68_to_-2.45",
+        "strength": 0.29339145505959374
+      },
+      {
+        "interaction": "market_cap_bin_Above_442.28 \u00d7 pct_change_low_bin_-3.68_to_-2.45",
+        "strength": 0.26913826155561327
+      },
+      {
+        "interaction": "pct_change_high_bin_6.76_to_25.40 \u00d7 pct_change_low_bin_-3.68_to_-2.45",
+        "strength": 0.25814983191310237
+      },
+      {
+        "interaction": "eps_surprise_bin_8.47_to_129.08 \u00d7 pct_change_low_bin_-3.68_to_-2.45",
+        "strength": 0.23645207929106377
+      },
+      {
+        "interaction": "eps_surprise_bin_8.47_to_129.08 \u00d7 market_cap_bin_Above_442.28",
+        "strength": 0.21518780237985702
+      },
+      {
+        "interaction": "market_cap_bin_Above_442.28 \u00d7 pct_change_high_bin_6.76_to_25.40",
+        "strength": 0.21221430922529472
+      },
+      {
+        "interaction": "eps_surprise_bin_8.47_to_129.08 \u00d7 pct_change_close_bin_2.58_to_40.28",
+        "strength": 0.18603281261230242
+      },
+      {
+        "interaction": "eps_surprise_bin_8.47_to_129.08 \u00d7 pct_change_high_bin_6.76_to_25.40",
+        "strength": 0.15038024420542362
+      }
+    ],
+    "model_performance": {
+      "cv_rmse": 4.963770458380718,
+      "r2_score": 0.8471533026231369,
+      "mae": 2.694628002174156,
+      "feature_count": 72
+    }
+  }
+}

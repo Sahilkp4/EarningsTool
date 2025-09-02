@@ -1,0 +1,15 @@
+{
+  "total_strategies_tested": 33,
+  "significant_strategies": 27,
+  "whites_reality_check": {
+    "p_value": 0.0,
+    "test_statistic": 11.398605595386242,
+    "passes": true,
+    "n_strategies_tested": 33
+  },
+  "multiple_testing_summary": {
+    "bonferroni_significant": "27",
+    "fdr_significant": "32",
+    "holm_significant": "28"
+  }
+}
